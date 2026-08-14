@@ -56,15 +56,12 @@ app.use("/api/v1/auth", AuthRoutes);
 app.get("/test",async (req: Request, res: Response, next:NextFunction) => {
  
 	try{
-
-		const otp=crypto.randomInt(100000,1000000)
-
-		// await redisclient.set("forgot-password-otp:patient1@gmail.com","123456",{
-		// 	expiration:{
-		// 		type:"EX",
-		// 		value:60
-		// 	}
-		// })
+		await redisclient.set("forgot-password-otp:patient1@gmail.com","123456",{
+			expiration:{
+				type:"EX",
+				value:60
+			}
+		})
 	
 	res.status(httpStatus.OK).json({
 		success: true,

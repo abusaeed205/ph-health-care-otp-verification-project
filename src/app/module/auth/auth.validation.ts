@@ -13,6 +13,14 @@ const patentZodSchema = z.object({
   }).optional()
 });
 
+
+
+ // এগুলো auth router এ ব্যবহার করা হচ্ছে
+const patentEmailVerifyZodSchema = z.object({
+  email: z.email(),
+  otp:z.string().length(6)
+});
+
 const forgetPasswordZodSchema = z.object({
   email: z.email(),
 })
@@ -33,6 +41,7 @@ const resetPasswordZodSchema = z.object({
   // এগুলো auth router এ ব্যবহার করা হচ্ছে
 export const ZodUserValidation ={
     patentZodSchema,
+    patentEmailVerifyZodSchema,
     forgetPasswordZodSchema,
     resetPasswordZodSchema
 }

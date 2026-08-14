@@ -12,6 +12,7 @@ import type {
 	IRegisterPatientPayload,
 	IRequestUser,
   IResetPasswordPayload,
+  IVerifyEmailPayload,
 } from "./auth.interface";
 import { googleclient } from "../../lib/googleAuth_ID";
 import crypto from "crypto"
@@ -19,6 +20,7 @@ import { redisclient } from "../../lib/redis";
 import { transporter } from "../../lib/nodemailler";
 import ejs from "ejs"
 import path from "path";
+import { TokenPayload } from "google-auth-library";
 
 
 const registerPatient = async (payload: IRegisterPatientPayload) => {
@@ -35,7 +37,26 @@ const registerPatient = async (payload: IRegisterPatientPayload) => {
 
 	const hashedPassword = await bcrypt.hash(password, 8);
 
-  
+
+  // ----------OTP & Email ------------
+
+  const expirationMinutes=5*60 // টাইমটা বলেদিতেছে কতো মিনিট থাকবে OTP
+  const otpkey=`patient-registration-otp:${email}`
+  const otpValue=crypto.randomInt(100000,1000000).toString() // crypto দিয়ে Random OTP বানাচ্ছি
+ 
+
+  // redisclient lib foulder থেকে আসতেছে এবং clien email and OTP  Set করছি 
+ await redisclient.set(otpkey,otpValue,{
+    expiration:{
+      type:"EX",
+      value:expirationMinutes
+    }
+  }) 
+
+  // ----------client data ------------
+
+  const patientRegistrationKey=`patient-registration-data:${email}` 
+
   // data গুলো payload থেকে পাই 
   const redisUserDataPayload={
     name,
@@ -43,34 +64,130 @@ const registerPatient = async (payload: IRegisterPatientPayload) => {
     password:hashedPassword,
     patient:patientData
   }
+  
+  // redisclient lib foulder থেকে আসতেছে এবং clien email and OTP  Set করছি 
+ await redisclient.set(
+  patientRegistrationKey,
+  JSON.stringify(redisUserDataPayload),{
+  // redis এর ডাটা stringify অবস্থায় থাকে ,তাই Object কে stringify করছি 
+    expiration:{
+      type:"EX",
+      value:expirationMinutes
+    }
+  }) 
 
-  // redis এ আমরা client ডাটা স্টোর করবো OTP verify করতে 
-
-
-
-
-	const createdUser = await prisma.user.create({
-	data: {
+   // যে ফাইলটাতে ejs কোড রাখা আছে সেটা এটার সাথে Join দিলাম 
+  const tempatePath=path.join(process.cwd(),"src/app/templates/registation-user-otp.ejs")
+  
+  // email massage temp formet
+  const templateData = {
 		name,
-		email,
-		password: hashedPassword,
+    email,
+		otpValue,// OTP এখানে যেভাবে লিখবো templates/forgot-password.ejs এ সেইম থাকবে
+		expirationMinutes: expirationMinutes / 60
+	}
+  
+	const html = await ejs.renderFile(tempatePath, templateData)
+  
+
+  // Password Change করলে Gmail এ email যাবে 
+  await transporter.sendMail({
+    // env config file থেকে আসতেছে 
+    from:config.email_sender,
+    to:email,
+    subject:"Email Verification",
+    html
+  })
+
+};
+
+const verifyPatientEmail=async(payload:IVerifyEmailPayload)=>{
+  const otp=payload.otp
+  const email=payload.email.trim().toLocaleLowerCase()
+
+ const isUserExist = await prisma.user.findUnique({
+		where: { email },
+	});
+
+	if (isUserExist?.status === "BLOCKED") {
+		throw new Error("User is Blocked")
+	}
+
+	if (isUserExist?.emailVerified) {
+		throw new Error("Email ALready Verified")
+	}
+
+	if (isUserExist?.isDeleted || isUserExist?.status === "DELETED") {
+		throw new Error("User is Deleted")
+	}
+
+  const otpkey=`patient-registration-otp:${email}`
+    // redisclient lib foulder থেকে আসতেছে এবং redios থেকে otp get করা হচ্ছে
+  const redisOtp=await redisclient.get(otpkey)
+
+  if(!redisOtp){
+    throw new Error("Invalid OTP")
+  }
+
+
+  if(redisOtp !== otp){
+    throw new Error("OTP Does Not Match")
+  }
+
+  // auto delete হবে otp 
+  await redisclient.del(otpkey)
+
+
+const patientRegistrationKey=`patient-registration-data:${email}` 
+
+const redisPatientData=await redisclient.get(patientRegistrationKey)
+
+if(!redisPatientData){
+  throw new Error("Patient Doesnt Exist")
+}
+const patientPayload : IRegisterPatientPayload=JSON.parse(redisPatientData)
+
+const createdUser = await prisma.user.create({
+	data: {
+		name: patientPayload.name,
+		email:patientPayload.email,
+		password:patientPayload.password,
 		role: Role.PATIENT,
 		status: UserStatus.ACTIVE,
-		emailVerified: false,
-    // patientData থাকলে Patient তৈরি করো, না থাকলে এই অংশটা বাদ দাও।
-		...(patientData && {
-			patient: {
+		emailVerified: true,
+    patient: {
 				create: {
-					name,
-					email,
-					contactNumber: patientData.contactNumber || null,
+				name: patientPayload.name,
+		    email:patientPayload.email,
+					contactNumber: patientPayload?.patient?.contactNumber || null,
 				},
 			},
-		}),
 	},
 	omit: { password: true },
 	include: { patient: true },
 });
+
+ // auto delete হবে email
+ await redisclient.del(patientRegistrationKey)
+
+   // যে ফাইলটাতে ejs কোড রাখা আছে সেটা এটার সাথে Join দিলাম 
+  const tempatePath=path.join(process.cwd(),"src/app/templates/patient-welcome-email.ejs")
+  
+  // email massage temp formet
+  const templateData = {
+		name:createdUser.name,
+	}
+
+	const html = await ejs.renderFile(tempatePath, templateData)
+  
+  // Password Change করলে Gmail এ email যাবে 
+  await transporter.sendMail({
+    // env config file থেকে আসতেছে 
+    from:config.email_sender,
+    to:email,
+    subject:"Wellcome To PH Healthcare System",
+    html
+  })
 
 	const { patient, ...user } = createdUser;
 	const jwtPayload = {
@@ -98,7 +215,12 @@ const registerPatient = async (payload: IRegisterPatientPayload) => {
 		accessToken,
 		refreshToken,
 	};
-};
+  
+
+
+
+
+}
 
 const loginUser = async (payload: ILoginUserPayload) => {
 	const { password } = payload;
@@ -226,400 +348,164 @@ const refreshToken = async (token: string) => {
 };
 
 // Google Login Fuction 
-// const googleLogin = async(payload:IGoogleLoginPayload ) => {
-// 	let googleIdTokenPayload : TokenPayload | null | undefined= null
+const googleLogin = async(payload:IGoogleLoginPayload ) => {
+  //  google-auth-library থেকে TokenPayload পাই
+	let googleIdTokenPayload : TokenPayload | null | undefined= null
 	
-// 	try{
-// 		const ticket=await googleclient.verifyIdToken({
-// 			idToken:payload.idToken,
-// 			audience:config.google_client_id
-// 		})
-// 		googleIdTokenPayload=ticket.getPayload()
-// 	}catch(error){
-// 		console.log("Google Id Token verification error:",error)
-// 		throw new Error("Invalid Google ID Token")
-// 	}
+	try{
+		const ticket=await googleclient.verifyIdToken({
+			idToken:payload.idToken,
+			audience:config.google_client_id
+		})
+		googleIdTokenPayload=ticket.getPayload()
+	}catch(error){
+		console.log("Google Id Token verification error:",error)
+		throw new Error("Invalid Google ID Token")
+	}
 
-// 	if(!googleIdTokenPayload){
-// 		throw new Error("Invalid Google ID Token payload")
-// 	}
+	if(!googleIdTokenPayload){
+		throw new Error("Invalid Google ID Token payload")
+	}
 
-// 	if(!googleIdTokenPayload.email){
-// 		throw new Error("Email not found in Google ID Token payload")
-// 	}
-// 	if(!googleIdTokenPayload.name){
-// 		throw new Error("Name not found in Google ID Token payload")
-// 	}
+	if(!googleIdTokenPayload.email){
+		throw new Error("Email not found in Google ID Token payload")
+	}
+	if(!googleIdTokenPayload.name){
+		throw new Error("Name not found in Google ID Token payload")
+	}
 	
 
-// 	const ifPatientExistsWithGoogleAuth=await prisma.user.findUnique({
-// 		where:{
-// 			email:googleIdTokenPayload.email,
-// 			role:Role.PATIENT,
-// 			googleId:googleIdTokenPayload.sub
-// 		}
-// 	})
+	const ifPatientExistsWithGoogleAuth=await prisma.user.findUnique({
+		where:{
+			email:googleIdTokenPayload.email,
+			role:Role.PATIENT,
+			googleId:googleIdTokenPayload.sub
+		}
+	})
 
-// 	let user=ifPatientExistsWithGoogleAuth
-//     // create a new user if not exists
-// 	if(!ifPatientExistsWithGoogleAuth){
+	let user=ifPatientExistsWithGoogleAuth
+    // create a new user if not exists
+	if(!ifPatientExistsWithGoogleAuth){
 
-// 		const ifpatientExistWithCredential=await prisma.user.findUnique({
-// 			where:{
-// 				email:googleIdTokenPayload.email,
-// 				role:Role.PATIENT,
-// 				authProvider:AuthProvider.CREDENTIALS
-// 			}
-// 		})
-// 		if(ifpatientExistWithCredential){
-// 			if(!ifpatientExistWithCredential.emailVerified){
-// 				throw new Error("Email is not verified, please verify your email first")
-// 			}
+		const ifpatientExistWithCredential=await prisma.user.findUnique({
+			where:{
+				email:googleIdTokenPayload.email,
+				role:Role.PATIENT,
+				authProvider:AuthProvider.CREDENTIALS
+			}
+		})
+		if(ifpatientExistWithCredential){
+			if(!ifpatientExistWithCredential.emailVerified){
+				throw new Error("Email is not verified, please verify your email first")
+			}
 
 
-// 			if(ifpatientExistWithCredential.status===UserStatus.BLOCKED){
-// 				throw new Error("User is blocked")
-// 			}
-// 			if(ifpatientExistWithCredential.isDeleted || ifpatientExistWithCredential.status===UserStatus.DELETED){
-// 				throw new Error("User is deleted")
-// 			}
-// 			user=await prisma.user.update({
-// 				where:{
-// 					id:ifpatientExistWithCredential.id
-// 				},
-// 				data:{
-// 					googleId:googleIdTokenPayload.sub,
-// 					authProvider:AuthProvider.GOOGLE,
-// 					emailVerified:true
-// 				}
-// 			})		
+			if(ifpatientExistWithCredential.status===UserStatus.BLOCKED){
+				throw new Error("User is blocked")
+			}
+			if(ifpatientExistWithCredential.isDeleted || ifpatientExistWithCredential.status===UserStatus.DELETED){
+				throw new Error("User is deleted")
+			}
+			user=await prisma.user.update({
+				where:{
+					id:ifpatientExistWithCredential.id
+				},
+				data:{
+					googleId:googleIdTokenPayload.sub,
+					authProvider:AuthProvider.GOOGLE,
+					emailVerified:true
+				}
+			})		
 			
-// 		}else{
-// 		// Google Registered user exists
-// 		user=await prisma.user.create({
-// 			data:{
-// 				email:googleIdTokenPayload.email,
-// 				name:googleIdTokenPayload.name,
-// 				role:Role.PATIENT,
-// 				googleId:googleIdTokenPayload.sub,
-// 				authProvider:AuthProvider.GOOGLE,
-// 				emailVerified:true,
-// 				patient:{
-// 					create:{
-// 						name:googleIdTokenPayload.name,
-// 						email:googleIdTokenPayload.email
-// 					}
-// 				}
-// 			}
-
-// 		})
-// 	}
-
-		
-// 	}
-
-// 	if(!user) {
-// 		throw new Error("User not found or created")
-// 	}
-
-// 	if(user.status===UserStatus.BLOCKED){
-// 		throw new Error("User is blocked")
-// 	}
-// 	if(user.isDeleted || user.status===UserStatus.DELETED){
-// 		throw new Error("User is deleted")
-// 	}
-
-
-// 	const jwtPayload = {
-// 		userId: user.id,
-// 		name: user.name,
-// 		email: user.email,
-// 		role: user.role,
-// 	};
-
-// 	const accessToken = jwtUtils.createToken(
-// 		jwtPayload,
-// 		config.jwt_access_secret,
-// 		config.jwt_access_expires_in as SignOptions,
-// 	);
-
-// 	const refreshToken = jwtUtils.createToken(
-// 		jwtPayload,
-// 		config.jwt_refresh_secret,
-// 		config.jwt_refresh_expires_in as SignOptions,
-// 	);
-
-// 	return {
-// 		accessToken,
-// 		refreshToken,
-// 	};
-
-	
-// }
-// Google Login function
-// payload এর মধ্যে Google থেকে পাওয়া idToken থাকবে
-const googleLogin = async (payload: IGoogleLoginPayload) => {
-
-  // Google ID Token verify করার পরে যে information পাওয়া যাবে,
-  // সেটা এখানে রাখা হবে || শুরুতে null রাখা হয়েছে।
-  let googleIdTokenPayload: TokenPayload | null | undefined = null;
-
-  try {
-
-    // client থেকে আসা idToken যাচাই করছি।
-	// googleclient এটা Lib Folder থেকে আসছে 
-    const ticket = await googleclient.verifyIdToken({
-      // User-এর পাঠানো Google ID 
-      idToken: payload.idToken,
-
-      // এটা দিয়ে নিশ্চিত করা হয় token-টি আমাদের application-এর জন্যই তৈরি হয়েছে।
-      audience: config.google_client_id,
-    });
-
-    // Token verify সফল হলে Google token-এর ভিতরের তথ্য বের করছি।
-    // এখানে সাধারণত পাওয়া যায়:
-    // sub   = Google User ID
-    // email = User-এর email
-    // name  = User-এর নাম
-    // picture = Profile picture ইত্যাদি
-    googleIdTokenPayload = ticket.getPayload();
-
-  } catch (error) {
-
-    // Token verify করতে কোনো সমস্যা হলে এখানে আসবে।
-    console.log("Google Id Token verification error:", error);
-
-    // Client-কে generic error দিচ্ছি।
-    throw new Error("Invalid Google ID Token");
-  }
-
-
-  // Google থেকে কোনো payload পাওয়া না গেলে
-  // Login বন্ধ করে দিচ্ছি।
-  if (!googleIdTokenPayload) {
-    throw new Error("Invalid Google ID Token payload");
-  }
-
-
-  // Google token-এর মধ্যে email না থাকলে
-  // User identify করা সম্ভব হবে না।
-  if (!googleIdTokenPayload.email) {
-    throw new Error("Email not found in Google ID Token payload");
-  }
-
-
-  // Google token-এর মধ্যে name না থাকলে
-  // নতুন User তৈরি করার সময় name পাওয়া যাবে না।
-  if (!googleIdTokenPayload.name) {
-    throw new Error("Name not found in Google ID Token payload");
-  }
-
-
-  // এখন database-এ খুঁজছি:
-  // "এই Google account দিয়ে আগে থেকেই Patient হিসেবে
-  // account তৈরি করা আছে কি?"
-  const ifPatientExistsWithGoogleAuth = await prisma.user.findUnique({
-    where: {
-      email: googleIdTokenPayload.email,
-      role: Role.PATIENT,
-      googleId: googleIdTokenPayload.sub,
-    },
-  });
-
-
-  // আগে থেকেই Google account পাওয়া গেলে
-  // user variable-এ সেই user থাকবে।
-  let user = ifPatientExistsWithGoogleAuth;
-
-
-  // যদি Google authentication দিয়ে User আগে থেকে না থাকে
-  // তাহলে এই block-এর ভিতরে যাব।
-  if (!ifPatientExistsWithGoogleAuth) {
-
-  // সাধারণ ভাবে রেজিস্ট্রেশন করার পর আবার Google দিয়ে Login করতেছে কি না তা চেক করা হচ্ছে।
- 
-    const ifPatientExistWithCredential = await prisma.user.findUnique({
-      where: {
-        email: googleIdTokenPayload.email,
-        role: Role.PATIENT,
-        authProvider: AuthProvider.CREDENTIALS,
-      },
-    });
-
-
-    // যদি একই email-এর Credentials account পাওয়া যায়
-    if (ifPatientExistWithCredential) {
-      // আগে সেই account-এর email verify করা হয়েছে কিনা দেখছি。
-      if (!ifPatientExistWithCredential.emailVerified) {
-        throw new Error(
-          "Email is not verified, please verify your email first"
-        );
-      }
-
-
-      // User BLOCKED কিনা check করছি।
-      if (ifPatientExistWithCredential.status === UserStatus.BLOCKED) {
-
-        // Blocked হলে Login করতে দিচ্ছি না।
-        throw new Error("User is blocked");
-      }
-
-
-      // User delete করা হয়েছে কিনা check করছি।
-      //
-      // দুইভাবে delete হতে পারে:
-      // 1. isDeleted = true
-      // 2. status = DELETED
-      if (
-        ifPatientExistWithCredential.isDeleted ||
-        ifPatientExistWithCredential.status === UserStatus.DELETED
-      ) {
-        // Deleted user Login করতে পারবে না।
-        throw new Error("User is deleted");
-      }
-
-
-      // Credentials account-কে এখন Google account-এর সাথে
-      // connect/link করে দিচ্ছি।
-      user = await prisma.user.update({
-
-        // কোন User update করতে হবে
-        // তার id দিয়ে খুঁজছি।
-        where: {
-          id: ifPatientExistWithCredential.id,
-        },
-
-        // User-এর data update করছি।
-        data: {
-
-          // Google-এর unique user ID database-এ save করছি।
-          googleId: googleIdTokenPayload.sub,
-
-          // Auth provider এখন GOOGLE করে দিচ্ছি।
-          // অর্থাৎ পরবর্তীতে এই account Google authentication
-          // দিয়ে Login করতে পারবে।
-          authProvider: AuthProvider.GOOGLE,
-
-          // Google দিয়ে successfully authenticate হওয়ায়
-          // emailVerified true করছি।
-          emailVerified: true,
-        },
-      });
-
-
-    } else {
-
-      // এখানে আসার অর্থ:
-      //
-      // 1. এই Google account আগে থেকে নেই
-      // 2. এই email দিয়ে Credentials account-ও নেই
-      //
-      // তাই নতুন User তৈরি করতে হবে।
-
-      user = await prisma.user.create({
-
-        data: {
-
-          // Google account-এর email database-এ save করছি।
-          email: googleIdTokenPayload.email,
-
-          // Google account থেকে পাওয়া name save করছি।
-          name: googleIdTokenPayload.name,
-
-          // User-এর role PATIENT হিসেবে সেট করছি।
-          role: Role.PATIENT,
-
-          // Google-এর unique ID save করছি।
-          googleId: googleIdTokenPayload.sub,
-
-          // Authentication provider GOOGLE হবে।
-          authProvider: AuthProvider.GOOGLE,
-
-          // Google account verify করা হয়েছে,
-          // তাই emailVerified true।
-          emailVerified: true,
-
-          // User-এর সাথে Patient record-ও তৈরি করছি।
-          patient: {
-
-            create: {
-
-              // Patient table-এ name save করছি।
-              name: googleIdTokenPayload.name,
-
-              // Patient table-এ email save করছি।
-              email: googleIdTokenPayload.email,
-            },
-          },
-        },
-      });
-    }
-  }
-
-
-  // কোনো কারণে user পাওয়া না গেলে
-  // এবং create/update-ও না হলে error দিবে।
-  if (!user) {
-    throw new Error("User not found or created");
-  }
-
-
-  // User BLOCKED কিনা আবার check করছি।
-  //
-  // এটা গুরুত্বপূর্ণ কারণ User Google account দিয়ে আগে থেকেই
-  // exist করতে পারে।
-  if (user.status === UserStatus.BLOCKED) {
-    throw new Error("User is blocked");
-  }
-
-
-  // User deleted কিনা আবার check করছি।
-  if (
-    user.isDeleted ||
-    user.status === UserStatus.DELETED
-  ) {
-    throw new Error("User is deleted");
-  }
-
-
-  // JWT Token-এর ভিতরে যেসব information রাখতে চাই
-  // সেগুলো এখানে তৈরি করছি।
-  const jwtPayload = {
-    userId: user.id,
-    name: user.name,
-    email: user.email,
-    role: user.role,
-  };
-
-
-  // Access Token তৈরি করছি।
-  const accessToken = jwtUtils.createToken(
-    jwtPayload,
-
-    // Access token-এর secret key
-    config.jwt_access_secret,
-
-    // Access token কতক্ষণ valid থাকবে
-    config.jwt_access_expires_in as SignOptions,
-  );
-
-  const refreshToken = jwtUtils.createToken(
-    jwtPayload,
-
-    // Refresh token-এর secret key
-    config.jwt_refresh_secret,
-
-    // Refresh token কতক্ষণ valid থাকবে
-    config.jwt_refresh_expires_in as SignOptions,
-  );
-
-
+		}else{
+		// Google Registered user exists
+		user=await prisma.user.create({
+			data:{
+				email:googleIdTokenPayload.email,
+				name:googleIdTokenPayload.name,
+				role:Role.PATIENT,
+				googleId:googleIdTokenPayload.sub,
+				authProvider:AuthProvider.GOOGLE,
+				emailVerified:true,
+				patient:{
+					create:{
+						name:googleIdTokenPayload.name,
+						email:googleIdTokenPayload.email
+					}
+				}
+			}
+
+		})
+
+//-----Google Register Auto Email Send----------------
+
+
+     // যে ফাইলটাতে ejs কোড রাখা আছে সেটা এটার সাথে Join দিলাম 
+  const tempatePath=path.join(process.cwd(),"src/app/templates/patient-welcome-email.ejs")
   
-  return {
-    accessToken,
-    refreshToken,
-  };
-};
+  // email massage temp formet
+  const templateData = {
+		name:user.name,
+    email:user.email,
+	}
+  
+	const html = await ejs.renderFile(tempatePath, templateData)
+  
+  // Password Change করলে Gmail এ email যাবে 
+  await transporter.sendMail({
+    // env config file থেকে আসতেছে 
+    from:config.email_sender,
+    to:user.email,
+    subject:"Email Verification",
+    html
+  })
+
+
+
+
+
+	}
+	}
+
+	if(!user) {
+		throw new Error("User not found or created")
+	}
+
+	if(user.status===UserStatus.BLOCKED){
+		throw new Error("User is blocked")
+	}
+	if(user.isDeleted || user.status===UserStatus.DELETED){
+		throw new Error("User is deleted")
+	}
+
+
+	const jwtPayload = {
+		userId: user.id,
+		name: user.name,
+		email: user.email,
+		role: user.role,
+	};
+
+	const accessToken = jwtUtils.createToken(
+		jwtPayload,
+		config.jwt_access_secret,
+		config.jwt_access_expires_in as SignOptions,
+	);
+
+	const refreshToken = jwtUtils.createToken(
+		jwtPayload,
+		config.jwt_refresh_secret,
+		config.jwt_refresh_expires_in as SignOptions,
+	);
+
+	return {
+		accessToken,
+		refreshToken,
+	};
+
+}
+
+
 
 
 const forgetPassword=async(payload:IForgotPasswordPayload)=>{
@@ -669,12 +555,17 @@ const forgetPassword=async(payload:IForgotPasswordPayload)=>{
 
   // যে ফাইলটাতে ejs কোড রাখা আছে সেটা এটার সাথে Join দিলাম 
   const tempatePath=path.join(process.cwd(),"src/app/templates/forgot-password.ejs")
+  
   // email massage temp formet
-  const html= await ejs.renderFile(tempatePath,{
-    name:isUserExist.name,
-    OTP:otp ,// OTP এখানে যেভাবে লিখবো templates/forgot-password.ejs এ সেইম থাকবে
-    expirationMinutes:expirationMinutes/60
-  })
+  const templateData = {
+		name: isUserExist.name,
+		otp,// OTP এখানে যেভাবে লিখবো templates/forgot-password.ejs এ সেইম থাকবে
+		expirationMinutes: expirationMinutes / 60
+	}
+
+	const html = await ejs.renderFile(tempatePath, templateData)
+  
+
 
   // Password Change করলে Gmail এ email যাবে 
   await transporter.sendMail({
@@ -716,6 +607,8 @@ const resetPassword=async(payload:IResetPasswordPayload)=>{
   if(isUserExist.googleId && isUserExist.authProvider==="GOOGLE"){
     throw new Error("User Has Account with Google")
   }
+
+  //---------- Otp verify------------- 
 
   const key=`forgot-password-otp:${isUserExist.email}`
     // redisclient lib foulder থেকে আসতেছে
@@ -763,13 +656,9 @@ const resetPassword=async(payload:IResetPasswordPayload)=>{
 
 }
 
-
-
-
-
-
 export const AuthService = {
 	registerPatient,
+  verifyPatientEmail,
 	loginUser,
 	getMe,
 	refreshToken,

@@ -9,8 +9,20 @@ import { AuthService } from "./auth.service";
 
 
 const registerPatient = catchAsync(async (req: Request, res: Response) => {
+    const payload = req.body;
+	await AuthService.registerPatient(payload);
+	sendResponse(res, {
+		statusCode: httpStatus.CREATED,
+		success: true,
+		message: "Verification OTP Sent",
+		data: null
+	});
+	
+});
 
-  const result = await AuthService.registerPatient(req.body);
+const verifyPatientEmail= catchAsync(async (req: Request, res: Response) => {
+
+const result=await AuthService.verifyPatientEmail(req.body);
 
 	const { accessToken, refreshToken, user, patient } = result;
 
@@ -30,13 +42,13 @@ const registerPatient = catchAsync(async (req: Request, res: Response) => {
 	sendResponse(res, {
 		statusCode: httpStatus.CREATED,
 		success: true,
-		message: "Patient registered successfully",
-		data: {
+		message: "Verification OTP Sent",
+		data:{
 			accessToken,
 			refreshToken,
 			user,
-			patient,
-		},
+			patient
+		}
 	});
 });
 
@@ -324,10 +336,11 @@ const resetPassword = catchAsync(async (req: Request, res: Response) => {
 
 export const AuthController = {
 	registerPatient,
+	verifyPatientEmail,
 	loginUser,
 	getMe,
 	refreshToken,
 	googleLoginController,
-  forgetPassword,
-  resetPassword
+   forgetPassword,
+   resetPassword
 };

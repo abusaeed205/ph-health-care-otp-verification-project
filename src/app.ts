@@ -9,6 +9,7 @@ import { AuthRoutes } from "./app/module/auth/auth.route";
 import z from "zod";
 import { redisclient } from "./app/lib/redis";
 import crypto from "crypto"
+import { UserRoutes } from "./app/module/user'/user.route";
 
 const app: Application = express();
 
@@ -21,13 +22,12 @@ app.use(
 
 // Enable URL-encoded form data parsing
 app.use(express.urlencoded({ extended: true }));
-
 // Middleware to parse JSON bodies
 app.use(express.json());
 app.use(cookieParser());
 
 app.use("/api/v1/auth", AuthRoutes);
-
+app.use("/api/v1/user",UserRoutes)
 // app.post("/zod",async (req: Request, res: Response, next:NextFunction) => {
  
 // 	try{
@@ -74,8 +74,6 @@ app.get("/test",async (req: Request, res: Response, next:NextFunction) => {
 	}
 
 })
-
-
 
 // Basic route
 app.get("/", async (req: Request, res: Response) => {

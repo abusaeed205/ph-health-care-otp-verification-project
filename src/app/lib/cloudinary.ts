@@ -5,9 +5,9 @@ import { v2 as Uploader } from "cloudinary";
 
 // Configure Cloudinary (use your own cloud_name, api_key, and api_secret)
 Uploader.config({
-  cloud_name:config.cloudinary_cloud_name,
-  api_key: config.cloudinary_api_key,
-  api_secret:config.cloudinary_api_secret
+	cloud_name: config.cloudinary_cloud_name,
+	api_key: config.cloudinary_api_key,
+	api_secret: config.cloudinary_api_secret,
 });
 
-export const cloudinary=Uploader
+export const cloudinary = Uploader;

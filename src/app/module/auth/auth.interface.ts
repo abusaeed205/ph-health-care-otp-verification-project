@@ -9,23 +9,15 @@ export interface IRegisterPatientPayload {
 	name: string;
 	email: string;
 	password: string;
-	patient:{
+	patient: {
 		contactNumber?: string;
-	}
+	};
 }
-
-
 
 export interface IVerifyEmailPayload {
 	email: string;
-	otp:string
-	
+	otp: string;
 }
-
-
-
-
-
 
 export interface IRequestUser {
 	userId: string;
@@ -35,16 +27,16 @@ export interface IRequestUser {
 }
 
 export interface IGoogleLoginPayload {
-	idToken: string
+	idToken: string;
 }
 
-// Service এ এগুলো ব্যবহার করা হয়েছে 
-export interface IForgotPasswordPayload{
-	email:string
+// Service এ এগুলো ব্যবহার করা হয়েছে
+export interface IForgotPasswordPayload {
+	email: string;
 }
-// Service এ এগুলো ব্যবহার করা হয়েছে 
-export interface IResetPasswordPayload{
-	email:string
-	newPassword:string
-	otp:string
+// Service এ এগুলো ব্যবহার করা হয়েছে
+export interface IResetPasswordPayload {
+	email: string;
+	newPassword: string;
+	otp: string;
 }

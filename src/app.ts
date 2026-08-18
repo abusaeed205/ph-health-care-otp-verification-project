@@ -1,15 +1,20 @@
 import cookieParser from "cookie-parser";
 import cors from "cors";
-import express, { NextFunction, type Application, type Request, type Response } from "express";
+import express, {
+	NextFunction,
+	type Application,
+	type Request,
+	type Response,
+} from "express";
 import httpStatus from "http-status";
 import config from "./app/config";
 import { globalErrorHandler } from "./app/middleware/globalErrorHandler";
 import { notFound } from "./app/middleware/notFound";
 import { AuthRoutes } from "./app/module/auth/auth.route";
-import z from "zod";
 import { redisclient } from "./app/lib/redis";
-import crypto from "crypto"
 import { UserRoutes } from "./app/module/user'/user.route";
+import { getBkashIdToken } from "./app/lib/bkash";
+import { appointmentRoutes } from "./app/module/appointment/appointment.route";
 
 const app: Application = express();
 
@@ -27,53 +32,25 @@ app.use(express.json());
 app.use(cookieParser());
 
 app.use("/api/v1/auth", AuthRoutes);
-app.use("/api/v1/user",UserRoutes)
-// app.post("/zod",async (req: Request, res: Response, next:NextFunction) => {
- 
-// 	try{
-// 		const userZodSchema=z.object({
-// 		name:z.string(),
-// 		age:z.number(),
-// 		isVerified:z.boolean(),
-// 		books:z.array(z.string())
-// 	})
+app.use("/api/v1/user", UserRoutes);
+app.use("/api/v1/appointment", appointmentRoutes);
 
-//     const payload=req.body
-// 	const result=userZodSchema.parse(payload)
-// 	console.log(result)
-	
-// 	res.status(httpStatus.OK).json({
-// 		success: true,
-// 		message: "Welcome to PH Healthcare System Backend",
-// 	});
-// 	}catch(error){
-// 		console.log(error)
-// 		next(error)
-// 	}
+app.get("/test", async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		//    getBkashIdToken এটা lib থেকে আসতেছে
+		const grantIdTokenResult = await getBkashIdToken();
+		console.log(grantIdTokenResult);
 
-// })
-
-app.get("/test",async (req: Request, res: Response, next:NextFunction) => {
- 
-	try{
-		await redisclient.set("forgot-password-otp:patient1@gmail.com","123456",{
-			expiration:{
-				type:"EX",
-				value:60
-			}
-		})
-	
-	res.status(httpStatus.OK).json({
-		success: true,
-		message: "Welcome to PH Healthcare System Backend",
-		data:otp
-	});
-	}catch(error){
-		console.log(error)
-		next(error)
+		res.status(httpStatus.OK).json({
+			success: true,
+			message: "Welcome to PH Healthcare System Backend",
+			data: null,
+		});
+	} catch (error) {
+		console.log(error);
+		next(error);
 	}
-
-})
+});
 
 // Basic route
 app.get("/", async (req: Request, res: Response) => {
@@ -87,4 +64,3 @@ app.use(globalErrorHandler);
 app.use(notFound);
 
 export default app;
-

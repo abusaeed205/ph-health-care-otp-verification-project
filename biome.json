@@ -5,10 +5,12 @@
 		"clientKind": "git",
 		"useIgnoreFile": true
 	},
+
+
 	"files": {
 		"ignoreUnknown": false,
 		"includes": [
-			"**",
+			"**", 
 			"!src/genrated",
 			"!src/app/templates"
 		]

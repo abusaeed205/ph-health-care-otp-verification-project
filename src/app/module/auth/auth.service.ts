@@ -1,30 +1,32 @@
-
 import bcrypt from "bcryptjs";
 import type { JwtPayload, SignOptions } from "jsonwebtoken";
-import { AuthProvider, Role, UserStatus } from "../../../generated/prisma/enums";
+import {
+	AuthProvider,
+	Role,
+	UserStatus,
+} from "../../../generated/prisma/enums";
 import config from "../../config";
 import { prisma } from "../../lib/prisma";
 import { jwtUtils } from "../../utils/jwt";
 import type {
-  IForgotPasswordPayload,
+	IForgotPasswordPayload,
 	IGoogleLoginPayload,
 	ILoginUserPayload,
 	IRegisterPatientPayload,
 	IRequestUser,
-  IResetPasswordPayload,
-  IVerifyEmailPayload,
+	IResetPasswordPayload,
+	IVerifyEmailPayload,
 } from "./auth.interface";
 import { googleclient } from "../../lib/googleAuth_ID";
-import crypto from "crypto"
+import crypto from "crypto";
 import { redisclient } from "../../lib/redis";
 import { transporter } from "../../lib/nodemailler";
-import ejs from "ejs"
+import ejs from "ejs";
 import path from "path";
 import { TokenPayload } from "google-auth-library";
 
-
 const registerPatient = async (payload: IRegisterPatientPayload) => {
-	const { name, password, patient:patientData } = payload;
+	const { name, password, patient: patientData } = payload;
 	const email = payload.email.trim().toLowerCase();
 
 	const isUserExists = await prisma.user.findUnique({
@@ -37,159 +39,168 @@ const registerPatient = async (payload: IRegisterPatientPayload) => {
 
 	const hashedPassword = await bcrypt.hash(password, 8);
 
+	// ----------OTP & Email ------------
 
-  // ----------OTP & Email ------------
+	const expirationMinutes = 5 * 60; // টাইমটা বলেদিতেছে কতো মিনিট থাকবে OTP
+	const otpkey = `patient-registration-otp:${email}`;
+	const otpValue = crypto.randomInt(100000, 1000000).toString(); // crypto দিয়ে Random OTP বানাচ্ছি
 
-  const expirationMinutes=5*60 // টাইমটা বলেদিতেছে কতো মিনিট থাকবে OTP
-  const otpkey=`patient-registration-otp:${email}`
-  const otpValue=crypto.randomInt(100000,1000000).toString() // crypto দিয়ে Random OTP বানাচ্ছি
- 
+	// redisclient lib foulder থেকে আসতেছে এবং clien email and OTP  Set করছি
+	await redisclient.set(otpkey, otpValue, {
+		expiration: {
+			type: "EX",
+			value: expirationMinutes,
+			//   উপরের variable থেকে আসতেছে
+		},
+	});
 
-  // redisclient lib foulder থেকে আসতেছে এবং clien email and OTP  Set করছি 
- await redisclient.set(otpkey,otpValue,{
-    expiration:{
-      type:"EX",
-      value:expirationMinutes
-    }
-  }) 
+	// ----------client data ------------
 
-  // ----------client data ------------
+	const patientRegistrationKey = `patient-registration-data:${email}`;
 
-  const patientRegistrationKey=`patient-registration-data:${email}` 
-
-  // data গুলো payload থেকে পাই 
-  const redisUserDataPayload={
-    name,
-    email,
-    password:hashedPassword,
-    patient:patientData
-  }
-  
-  // redisclient lib foulder থেকে আসতেছে এবং clien email and OTP  Set করছি 
- await redisclient.set(
-  patientRegistrationKey,
-  JSON.stringify(redisUserDataPayload),{
-  // redis এর ডাটা stringify অবস্থায় থাকে ,তাই Object কে stringify করছি 
-    expiration:{
-      type:"EX",
-      value:expirationMinutes
-    }
-  }) 
-
-   // যে ফাইলটাতে ejs কোড রাখা আছে সেটা এটার সাথে Join দিলাম 
-  const tempatePath=path.join(process.cwd(),"src/app/templates/registation-user-otp.ejs")
-  
-  // email massage temp formet
-  const templateData = {
+	// client data গুলো payload user থেকে আসতেছে
+	const redisUserDataPayload = {
 		name,
-    email,
-		otpValue,// OTP এখানে যেভাবে লিখবো templates/forgot-password.ejs এ সেইম থাকবে
-		expirationMinutes: expirationMinutes / 60
-	}
-  
-	const html = await ejs.renderFile(tempatePath, templateData)
-  
+		email,
+		password: hashedPassword,
+		patient: patientData,
+	};
 
-  // Password Change করলে Gmail এ email যাবে 
-  await transporter.sendMail({
-    // env config file থেকে আসতেছে 
-    from:config.email_sender,
-    to:email,
-    subject:"Email Verification",
-    html
-  })
+	// redisclient lib foulder থেকে আসতেছে এবং client DATA Set করছি
+	await redisclient.set(
+		patientRegistrationKey,
+		JSON.stringify(redisUserDataPayload),
+		{
+			// redis এর ডাটা stringify অবস্থায় থাকে ,তাই Object কে stringify করছি
+			expiration: {
+				type: "EX",
+				value: expirationMinutes,
+			},
+		},
+	);
 
+	// ------------------------------  Email Send -----------------------------------------
+
+	// যে ফাইলটাতে ejs কোড রাখা আছে সেটা এটার সাথে Join দিলাম
+	const tempatePath = path.join(
+		process.cwd(),
+		"src/app/templates/registation-user-otp.ejs",
+	);
+
+	// email massage temp formet
+	const templateData = {
+		name,
+		email,
+		otpValue, // OTP এখানে যেভাবে লিখবো templates/forgot-password.ejs এ সেইম থাকবে
+		expirationMinutes: expirationMinutes / 60,
+	};
+
+	const html = await ejs.renderFile(tempatePath, templateData);
+
+	// Password Change করলে Gmail এ email যাবে
+	await transporter.sendMail({
+		// env config file থেকে আসতেছে
+		from: config.email_sender,
+		to: email,
+		subject: "Email Verification",
+		html,
+	});
 };
 
-const verifyPatientEmail=async(payload:IVerifyEmailPayload)=>{
-  const otp=payload.otp
-  const email=payload.email.trim().toLocaleLowerCase()
+const verifyPatientEmail = async (payload: IVerifyEmailPayload) => {
+	const otp = payload.otp;
+	const email = payload.email.trim().toLocaleLowerCase();
 
- const isUserExist = await prisma.user.findUnique({
+	//   client email database আছে কি না
+	const isUserExist = await prisma.user.findUnique({
 		where: { email },
 	});
 
 	if (isUserExist?.status === "BLOCKED") {
-		throw new Error("User is Blocked")
+		throw new Error("User is Blocked");
 	}
 
 	if (isUserExist?.emailVerified) {
-		throw new Error("Email ALready Verified")
+		throw new Error("Email ALready Verified");
 	}
 
 	if (isUserExist?.isDeleted || isUserExist?.status === "DELETED") {
-		throw new Error("User is Deleted")
+		throw new Error("User is Deleted");
 	}
 
-  const otpkey=`patient-registration-otp:${email}`
-    // redisclient lib foulder থেকে আসতেছে এবং redios থেকে otp get করা হচ্ছে
-  const redisOtp=await redisclient.get(otpkey)
+	const otpkey = `patient-registration-otp:${email}`;
+	// redisclient lib foulder থেকে আসতেছে এবং redios থেকে otp get করা হচ্ছে
+	const redisOtp = await redisclient.get(otpkey);
 
-  if(!redisOtp){
-    throw new Error("Invalid OTP")
-  }
+	if (!redisOtp) {
+		throw new Error("Invalid OTP");
+	}
 
+	if (redisOtp !== otp) {
+		throw new Error("OTP Does Not Match");
+	}
 
-  if(redisOtp !== otp){
-    throw new Error("OTP Does Not Match")
-  }
+	// auto delete হবে otp
+	await redisclient.del(otpkey);
 
-  // auto delete হবে otp 
-  await redisclient.del(otpkey)
+	const patientRegistrationKey = `patient-registration-data:${email}`;
+	// redisclient lib foulder থেকে আসতেছে এবং redios থেকে USER Data get করা হচ্ছে
+	const redisPatientData = await redisclient.get(patientRegistrationKey);
 
+	if (!redisPatientData) {
+		throw new Error("Patient Doesnt Exist");
+	}
+	const patientPayload: IRegisterPatientPayload = JSON.parse(redisPatientData);
 
-const patientRegistrationKey=`patient-registration-data:${email}` 
-
-const redisPatientData=await redisclient.get(patientRegistrationKey)
-
-if(!redisPatientData){
-  throw new Error("Patient Doesnt Exist")
-}
-const patientPayload : IRegisterPatientPayload=JSON.parse(redisPatientData)
-
-const createdUser = await prisma.user.create({
-	data: {
-		name: patientPayload.name,
-		email:patientPayload.email,
-		password:patientPayload.password,
-		role: Role.PATIENT,
-		status: UserStatus.ACTIVE,
-		emailVerified: true,
-    patient: {
+	// এখান থেকে Data ডাটাবেইজে পাঠাচ্ছি
+	const createdUser = await prisma.user.create({
+		data: {
+			name: patientPayload.name,
+			email: patientPayload.email,
+			password: patientPayload.password,
+			role: Role.PATIENT,
+			status: UserStatus.ACTIVE,
+			emailVerified: true,
+			patient: {
 				create: {
-				name: patientPayload.name,
-		    email:patientPayload.email,
+					name: patientPayload.name,
+					email: patientPayload.email,
 					contactNumber: patientPayload?.patient?.contactNumber || null,
 				},
 			},
-	},
-	omit: { password: true },
-	include: { patient: true },
-});
+		},
+		omit: { password: true },
+		include: { patient: true },
+	});
 
- // auto delete হবে email
- await redisclient.del(patientRegistrationKey)
+	// auto delete হবে email
+	await redisclient.del(patientRegistrationKey);
 
-   // যে ফাইলটাতে ejs কোড রাখা আছে সেটা এটার সাথে Join দিলাম 
-  const tempatePath=path.join(process.cwd(),"src/app/templates/patient-welcome-email.ejs")
-  
-  // email massage temp formet
-  const templateData = {
-		name:createdUser.name,
-	}
+	// যে ফাইলটাতে ejs কোড রাখা আছে সেটা এটার সাথে Join দিলাম
+	const tempatePath = path.join(
+		process.cwd(),
+		"src/app/templates/patient-welcome-email.ejs",
+	);
 
-	const html = await ejs.renderFile(tempatePath, templateData)
-  
-  // Password Change করলে Gmail এ email যাবে 
-  await transporter.sendMail({
-    // env config file থেকে আসতেছে 
-    from:config.email_sender,
-    to:email,
-    subject:"Wellcome To PH Healthcare System",
-    html
-  })
+	// email massage temp formet
+	const templateData = {
+		name: createdUser.name,
+	};
 
+	const html = await ejs.renderFile(tempatePath, templateData);
+
+	// Password Change করলে Gmail এ email যাবে
+	await transporter.sendMail({
+		// env config file থেকে আসতেছে
+		from: config.email_sender,
+		to: email,
+		subject: "Wellcome To PH Healthcare System",
+		html,
+	});
+
+	// createdUser object থেকে patient আলাদা করে নেওয়া, আর বাকি সব property user object-এর মধ্যে রাখা।
 	const { patient, ...user } = createdUser;
+	// এই ফাইলটা accessToken এবং refreshToken এ যাচ্ছে
 	const jwtPayload = {
 		userId: user.id,
 		name: user.name,
@@ -197,12 +208,14 @@ const createdUser = await prisma.user.create({
 		role: user.role,
 	};
 
+	// jwtUtils Utils ফাইল থেকে আসতেছে
 	const accessToken = jwtUtils.createToken(
 		jwtPayload,
 		config.jwt_access_secret,
 		config.jwt_access_expires_in as SignOptions,
 	);
 
+	// jwtUtils Utils ফাইল থেকে আসতেছে
 	const refreshToken = jwtUtils.createToken(
 		jwtPayload,
 		config.jwt_refresh_secret,
@@ -215,12 +228,7 @@ const createdUser = await prisma.user.create({
 		accessToken,
 		refreshToken,
 	};
-  
-
-
-
-
-}
+};
 
 const loginUser = async (payload: ILoginUserPayload) => {
 	const { password } = payload;
@@ -242,12 +250,16 @@ const loginUser = async (payload: ILoginUserPayload) => {
 		throw new Error("User is deleted");
 	}
 
-	if(user.password===null && user.googleId !==null){
-		throw new Error("User already registered with Google, please login with Google");
+	if (user.password === null && user.googleId !== null) {
+		throw new Error(
+			"User already registered with Google, please login with Google",
+		);
 	}
 
-
-	const isPasswordMatched = await bcrypt.compare(password, user.password as string);
+	const isPasswordMatched = await bcrypt.compare(
+		password,
+		user.password as string,
+	);
 
 	if (!isPasswordMatched) {
 		throw new Error("Invalid credentials");
@@ -347,137 +359,133 @@ const refreshToken = async (token: string) => {
 	};
 };
 
-// Google Login Fuction 
-const googleLogin = async(payload:IGoogleLoginPayload ) => {
-  //  google-auth-library থেকে TokenPayload পাই
-	let googleIdTokenPayload : TokenPayload | null | undefined= null
-	
-	try{
-		const ticket=await googleclient.verifyIdToken({
-			idToken:payload.idToken,
-			audience:config.google_client_id
-		})
-		googleIdTokenPayload=ticket.getPayload()
-	}catch(error){
-		console.log("Google Id Token verification error:",error)
-		throw new Error("Invalid Google ID Token")
+// Google Login Fuction
+const googleLogin = async (payload: IGoogleLoginPayload) => {
+	//  google-auth-library থেকে TokenPayload পাই
+	let googleIdTokenPayload: TokenPayload | null | undefined = null;
+
+	try {
+		const ticket = await googleclient.verifyIdToken({
+			idToken: payload.idToken,
+			audience: config.google_client_id,
+		});
+		googleIdTokenPayload = ticket.getPayload();
+	} catch (error) {
+		console.log("Google Id Token verification error:", error);
+		throw new Error("Invalid Google ID Token");
 	}
 
-	if(!googleIdTokenPayload){
-		throw new Error("Invalid Google ID Token payload")
+	if (!googleIdTokenPayload) {
+		throw new Error("Invalid Google ID Token payload");
 	}
 
-	if(!googleIdTokenPayload.email){
-		throw new Error("Email not found in Google ID Token payload")
+	if (!googleIdTokenPayload.email) {
+		throw new Error("Email not found in Google ID Token payload");
 	}
-	if(!googleIdTokenPayload.name){
-		throw new Error("Name not found in Google ID Token payload")
+	if (!googleIdTokenPayload.name) {
+		throw new Error("Name not found in Google ID Token payload");
 	}
-	
 
-	const ifPatientExistsWithGoogleAuth=await prisma.user.findUnique({
-		where:{
-			email:googleIdTokenPayload.email,
-			role:Role.PATIENT,
-			googleId:googleIdTokenPayload.sub
-		}
-	})
+	const ifPatientExistsWithGoogleAuth = await prisma.user.findUnique({
+		where: {
+			email: googleIdTokenPayload.email,
+			role: Role.PATIENT,
+			googleId: googleIdTokenPayload.sub,
+		},
+	});
 
-	let user=ifPatientExistsWithGoogleAuth
-    // create a new user if not exists
-	if(!ifPatientExistsWithGoogleAuth){
-
-		const ifpatientExistWithCredential=await prisma.user.findUnique({
-			where:{
-				email:googleIdTokenPayload.email,
-				role:Role.PATIENT,
-				authProvider:AuthProvider.CREDENTIALS
+	let user = ifPatientExistsWithGoogleAuth;
+	// create a new user if not exists
+	if (!ifPatientExistsWithGoogleAuth) {
+		const ifpatientExistWithCredential = await prisma.user.findUnique({
+			where: {
+				email: googleIdTokenPayload.email,
+				role: Role.PATIENT,
+				authProvider: AuthProvider.CREDENTIALS,
+			},
+		});
+		if (ifpatientExistWithCredential) {
+			if (!ifpatientExistWithCredential.emailVerified) {
+				throw new Error(
+					"Email is not verified, please verify your email first",
+				);
 			}
-		})
-		if(ifpatientExistWithCredential){
-			if(!ifpatientExistWithCredential.emailVerified){
-				throw new Error("Email is not verified, please verify your email first")
-			}
 
-
-			if(ifpatientExistWithCredential.status===UserStatus.BLOCKED){
-				throw new Error("User is blocked")
+			if (ifpatientExistWithCredential.status === UserStatus.BLOCKED) {
+				throw new Error("User is blocked");
 			}
-			if(ifpatientExistWithCredential.isDeleted || ifpatientExistWithCredential.status===UserStatus.DELETED){
-				throw new Error("User is deleted")
+			if (
+				ifpatientExistWithCredential.isDeleted ||
+				ifpatientExistWithCredential.status === UserStatus.DELETED
+			) {
+				throw new Error("User is deleted");
 			}
-			user=await prisma.user.update({
-				where:{
-					id:ifpatientExistWithCredential.id
+			user = await prisma.user.update({
+				where: {
+					id: ifpatientExistWithCredential.id,
 				},
-				data:{
-					googleId:googleIdTokenPayload.sub,
-					authProvider:AuthProvider.GOOGLE,
-					emailVerified:true
-				}
-			})		
-			
-		}else{
-		// Google Registered user exists
-		user=await prisma.user.create({
-			data:{
-				email:googleIdTokenPayload.email,
-				name:googleIdTokenPayload.name,
-				role:Role.PATIENT,
-				googleId:googleIdTokenPayload.sub,
-				authProvider:AuthProvider.GOOGLE,
-				emailVerified:true,
-				patient:{
-					create:{
-						name:googleIdTokenPayload.name,
-						email:googleIdTokenPayload.email
-					}
-				}
-			}
+				data: {
+					googleId: googleIdTokenPayload.sub,
+					authProvider: AuthProvider.GOOGLE,
+					emailVerified: true,
+				},
+			});
+		} else {
+			// Google Registered user exists
+			user = await prisma.user.create({
+				data: {
+					email: googleIdTokenPayload.email,
+					name: googleIdTokenPayload.name,
+					role: Role.PATIENT,
+					googleId: googleIdTokenPayload.sub,
+					authProvider: AuthProvider.GOOGLE,
+					emailVerified: true,
+					patient: {
+						create: {
+							name: googleIdTokenPayload.name,
+							email: googleIdTokenPayload.email,
+						},
+					},
+				},
+			});
 
-		})
+			//-----Google Register Auto Email Send----------------
 
-//-----Google Register Auto Email Send----------------
+			// যে ফাইলটাতে ejs কোড রাখা আছে সেটা এটার সাথে Join দিলাম
+			const tempatePath = path.join(
+				process.cwd(),
+				"src/app/templates/patient-welcome-email.ejs",
+			);
 
+			// email massage temp formet
+			const templateData = {
+				name: user.name,
+				email: user.email,
+			};
 
-     // যে ফাইলটাতে ejs কোড রাখা আছে সেটা এটার সাথে Join দিলাম 
-  const tempatePath=path.join(process.cwd(),"src/app/templates/patient-welcome-email.ejs")
-  
-  // email massage temp formet
-  const templateData = {
-		name:user.name,
-    email:user.email,
-	}
-  
-	const html = await ejs.renderFile(tempatePath, templateData)
-  
-  // Password Change করলে Gmail এ email যাবে 
-  await transporter.sendMail({
-    // env config file থেকে আসতেছে 
-    from:config.email_sender,
-    to:user.email,
-    subject:"Email Verification",
-    html
-  })
+			const html = await ejs.renderFile(tempatePath, templateData);
 
-
-
-
-
-	}
+			// Password Change করলে Gmail এ email যাবে
+			await transporter.sendMail({
+				// env config file থেকে আসতেছে
+				from: config.email_sender,
+				to: user.email,
+				subject: "Email Verification",
+				html,
+			});
+		}
 	}
 
-	if(!user) {
-		throw new Error("User not found or created")
+	if (!user) {
+		throw new Error("User not found or created");
 	}
 
-	if(user.status===UserStatus.BLOCKED){
-		throw new Error("User is blocked")
+	if (user.status === UserStatus.BLOCKED) {
+		throw new Error("User is blocked");
 	}
-	if(user.isDeleted || user.status===UserStatus.DELETED){
-		throw new Error("User is deleted")
+	if (user.isDeleted || user.status === UserStatus.DELETED) {
+		throw new Error("User is deleted");
 	}
-
 
 	const jwtPayload = {
 		userId: user.id,
@@ -502,167 +510,162 @@ const googleLogin = async(payload:IGoogleLoginPayload ) => {
 		accessToken,
 		refreshToken,
 	};
+};
 
-}
+const forgetPassword = async (payload: IForgotPasswordPayload) => {
+	const { email } = payload;
 
+	const isUserExist = await prisma.user.findUnique({
+		where: {
+			email,
+		},
+	});
 
-
-
-const forgetPassword=async(payload:IForgotPasswordPayload)=>{
-  const {email}=payload
-
-  const isUserExist=await prisma.user.findUnique({
-    where:{
-      email
-    }
-  })
-
-  if(!isUserExist){
-    throw new Error("User Dose Not Exist")
-  }
-
-  if(isUserExist?.status==="BLOCKED"){
-    throw new Error("user is Blocked")
-  }
-
-  if(!isUserExist.emailVerified){
-    throw new Error("User Not Verified")
-  }
-
-  if(isUserExist.isDeleted || isUserExist.status === "DELETED"){
-    throw new Error("User is Deleted")
-  }
-
-  if(isUserExist.googleId && isUserExist.authProvider==="GOOGLE"){
-    throw new Error("User Has Account with Google")
-  }
-
-  // crypto দিয়ে Random OTP বানিয়ে redis ডাটাবেইজে জমা করা হচ্ছে
-  const otp=crypto.randomInt(100000,1000000).toString()
-  const key=`forgot-password-otp:${isUserExist.email}`
-  
-  
- const expirationMinutes=5*60 // টাইমটা বলেদিতেছে কতো মিনিট থাকবে OTP
-  
-  // redisclient lib foulder থেকে আসতেছে এবং OTP Set করছি 
-  await redisclient.set(key,otp,{
-    expiration:{
-      type:"EX",
-      value:expirationMinutes
-    }
-  }) 
-
-
-  // যে ফাইলটাতে ejs কোড রাখা আছে সেটা এটার সাথে Join দিলাম 
-  const tempatePath=path.join(process.cwd(),"src/app/templates/forgot-password.ejs")
-  
-  // email massage temp formet
-  const templateData = {
-		name: isUserExist.name,
-		otp,// OTP এখানে যেভাবে লিখবো templates/forgot-password.ejs এ সেইম থাকবে
-		expirationMinutes: expirationMinutes / 60
+	if (!isUserExist) {
+		throw new Error("User Dose Not Exist");
 	}
 
-	const html = await ejs.renderFile(tempatePath, templateData)
-  
+	if (isUserExist?.status === "BLOCKED") {
+		throw new Error("user is Blocked");
+	}
 
+	if (!isUserExist.emailVerified) {
+		throw new Error("User Not Verified");
+	}
 
-  // Password Change করলে Gmail এ email যাবে 
-  await transporter.sendMail({
-    // env config file থেকে আসতেছে 
-    from:config.email_sender,
-    to:isUserExist.email,
-    subject:"Forgot Password",
-    html
-  })
+	if (isUserExist.isDeleted || isUserExist.status === "DELETED") {
+		throw new Error("User is Deleted");
+	}
 
+	if (isUserExist.googleId && isUserExist.authProvider === "GOOGLE") {
+		throw new Error("User Has Account with Google");
+	}
 
-}
+	// crypto দিয়ে Random OTP বানিয়ে redis ডাটাবেইজে জমা করা হচ্ছে
+	const otp = crypto.randomInt(100000, 1000000).toString();
+	const key = `forgot-password-otp:${isUserExist.email}`;
 
-const resetPassword=async(payload:IResetPasswordPayload)=>{
- const {email,otp,newPassword}=payload
+	const expirationMinutes = 5 * 60; // টাইমটা বলেদিতেছে কতো মিনিট থাকবে OTP
 
-  const isUserExist=await prisma.user.findUnique({
-    where:{
-      email
-    }
-  })
+	// redisclient lib foulder থেকে আসতেছে এবং OTP Set করছি
+	await redisclient.set(key, otp, {
+		expiration: {
+			type: "EX",
+			value: expirationMinutes,
+		},
+	});
 
-  if(!isUserExist){
-    throw new Error("User Dose Not Exist")
-  }
+	// যে ফাইলটাতে ejs কোড রাখা আছে সেটা এটার সাথে Join দিলাম
+	const tempatePath = path.join(
+		process.cwd(),
+		"src/app/templates/forgot-password.ejs",
+	);
 
-  if(isUserExist?.status==="BLOCKED"){
-    throw new Error("user is Blocked")
-  }
+	// email massage temp formet
+	const templateData = {
+		name: isUserExist.name,
+		otp, // OTP এখানে যেভাবে লিখবো templates/forgot-password.ejs এ সেইম থাকবে
+		expirationMinutes: expirationMinutes / 60,
+	};
 
-  if(!isUserExist.emailVerified){
-    throw new Error("User Not Verified")
-  }
+	const html = await ejs.renderFile(tempatePath, templateData);
 
-  if(isUserExist.isDeleted || isUserExist.status === "DELETED"){
-    throw new Error("User is Deleted")
-  }
+	// Password Change করলে Gmail এ email যাবে
+	await transporter.sendMail({
+		// env config file থেকে আসতেছে
+		from: config.email_sender,
+		to: isUserExist.email,
+		subject: "Forgot Password",
+		html,
+	});
+};
 
-  if(isUserExist.googleId && isUserExist.authProvider==="GOOGLE"){
-    throw new Error("User Has Account with Google")
-  }
+const resetPassword = async (payload: IResetPasswordPayload) => {
+	const { email, otp, newPassword } = payload;
 
-  //---------- Otp verify------------- 
+	const isUserExist = await prisma.user.findUnique({
+		where: {
+			email,
+		},
+	});
 
-  const key=`forgot-password-otp:${isUserExist.email}`
-    // redisclient lib foulder থেকে আসতেছে
-  const redisOtp=await redisclient.get(key)
+	if (!isUserExist) {
+		throw new Error("User Dose Not Exist");
+	}
 
-  if(!redisOtp){
-    throw new Error("Invalid OTP")
-  }
+	if (isUserExist?.status === "BLOCKED") {
+		throw new Error("user is Blocked");
+	}
 
+	if (!isUserExist.emailVerified) {
+		throw new Error("User Not Verified");
+	}
 
-  if(redisOtp !== otp){
-    throw new Error("OTP Does Not Match")
-  }
+	if (isUserExist.isDeleted || isUserExist.status === "DELETED") {
+		throw new Error("User is Deleted");
+	}
 
+	if (isUserExist.googleId && isUserExist.authProvider === "GOOGLE") {
+		throw new Error("User Has Account with Google");
+	}
 
-  const hashedNewPassword=await bcrypt.hash(newPassword,Number(config.bcrypt_salt_rounds))
-  await prisma.user.update({
-    where:{
-      email:isUserExist.email
-    },
-    data:{
-      password:hashedNewPassword
-    }
-  })
+	//---------- Otp verify-------------
 
-    // redisclient lib foulder থেকে আসতেছে
-  await redisclient.del([key])
+	const key = `forgot-password-otp:${isUserExist.email}`;
+	// redisclient lib foulder থেকে আসতেছে
+	const redisOtp = await redisclient.get(key);
 
+	if (!redisOtp) {
+		throw new Error("Invalid OTP");
+	}
 
-   // যে ফাইলটাতে ejs কোড রাখা আছে সেটা এটার সাথে Join দিলাম 
-  const tempatePath=path.join(process.cwd(),"src/app/templates/reset-Password.ejs")
-  // email massage temp formet
-  const html= await ejs.renderFile(tempatePath,{
-    name:isUserExist.name,
-  })
+	if (redisOtp !== otp) {
+		throw new Error("OTP Does Not Match");
+	}
 
-    // Password Change করলে Gmail এ email যাবে 
-  await transporter.sendMail({
-    // env config file থেকে আসতেছে 
-    from:config.email_sender,
-    to:isUserExist.email,
-    subject:"Password Change",
-    html
-  })
+	const hashedNewPassword = await bcrypt.hash(
+		newPassword,
+		Number(config.bcrypt_salt_rounds),
+	);
+	await prisma.user.update({
+		where: {
+			email: isUserExist.email,
+		},
+		data: {
+			password: hashedNewPassword,
+		},
+	});
 
-}
+	// redisclient lib foulder থেকে আসতেছে
+	await redisclient.del([key]);
+
+	// যে ফাইলটাতে ejs কোড রাখা আছে সেটা এটার সাথে Join দিলাম
+	const tempatePath = path.join(
+		process.cwd(),
+		"src/app/templates/reset-Password.ejs",
+	);
+	// email massage temp formet
+	const html = await ejs.renderFile(tempatePath, {
+		name: isUserExist.name,
+	});
+
+	// Password Change করলে Gmail এ email যাবে
+	await transporter.sendMail({
+		// env config file থেকে আসতেছে
+		from: config.email_sender,
+		to: isUserExist.email,
+		subject: "Password Change",
+		html,
+	});
+};
 
 export const AuthService = {
 	registerPatient,
-  verifyPatientEmail,
+	verifyPatientEmail,
 	loginUser,
 	getMe,
 	refreshToken,
 	googleLogin,
-  forgetPassword,
-  resetPassword
+	forgetPassword,
+	resetPassword,
 };

@@ -3,36 +3,21 @@ import { redisclient } from "./redis";
 
 export const getBkashIdToken = async () => {
 	try {
-		// =========================================================
-		// STEP 1: Redis-এর জন্য ID Token এবং Refresh Token-এর Key তৈরি
-		// =========================================================
+		// Redis-এ টোকেন সেভ রাখার জন্য key নাম ঠিক করা হচ্ছে
 		const IdTokenkey = "bkash:idToken";
 		const RefreshTokenkey = "bkash:refreshToken";
 
-		// =========================================================
-		// STEP 2: Redis থেকে ID Token এবং তার TTL বের করা
-		//
-		// bkashIdToken     → Redis-এ থাকা বর্তমান ID Token
-		// bkashIdTokenTTL  → ID Token আর কত সেকেন্ড valid থাকবে
-		//
-		// TTL:
-		// - > 600  → ১০ মিনিটের বেশি সময় বাকি
-		// - <= 600 → ১০ মিনিট বা তার কম সময় বাকি
-		// - -2     → Redis-এ Key নেই
-		// =========================================================
+		// Redis থেকে আগে থেকে সেভ করা ID Token আনা হচ্ছে (যদি থাকে)
 		let bkashIdToken = await redisclient.get(IdTokenkey);
+
+		// ID Token-এর মেয়াদ আর কত সেকেন্ড বাকি আছে (TTL = Time To Live), সেটা চেক করা হচ্ছে
 		const bkashIdTokenTTL = await redisclient.ttl(IdTokenkey);
 
-		// =========================================================
-		// STEP 3: Redis থেকে Refresh Token এবং তার TTL বের করা
-		//
-		// bkashRefreshToken     → Redis-এ থাকা Refresh Token
-		// bkashRefreshTokenTTL  → Refresh Token আর কত সেকেন্ড valid থাকবে
-		// =========================================================
+		// একইভাবে Refresh Token আর তার মেয়াদ (TTL) আনা হচ্ছে
 		const bkashRefreshToken = await redisclient.get(RefreshTokenkey);
 		const bkashRefreshTokenTTL = await redisclient.ttl(RefreshTokenkey);
 
-		// বর্তমানে Redis-এ Token এবং তাদের TTL কী আছে সেটা দেখার জন্য
+		// ডিবাগিং-এর জন্য সব ভ্যালু কনসোলে প্রিন্ট করা হচ্ছে
 		console.log({
 			bkashIdToken,
 			bkashIdTokenTTL,
@@ -40,23 +25,20 @@ export const getBkashIdToken = async () => {
 			bkashRefreshTokenTTL,
 		});
 
-		// =========================================================
-		// STEP 4: ID Token-এর মেয়াদ ১০ মিনিট বা তার কম হলে
-		// এবং Refresh Token valid থাকলে
-		//
-		// Refresh Token ব্যবহার করে নতুন ID Token নেওয়া হবে।
-		// =========================================================
+		// ============ কেস ১: টোকেন রিফ্রেশ করার সময় হয়ে গেছে ============
+		// শর্ত: (ID Token নেই অথবা এর মেয়াদ ৬০০ সেকেন্ডের কম বাকি আছে)
+		//       এবং ID Token-এর মেয়াদ আসলেই ৬০০ সেকেন্ডের কম/সমান
+		//       এবং Refresh Token আছে
+		//       এবং Refresh Token-এর মেয়াদ ৬০০ সেকেন্ডের বেশি বাকি আছে (মানে refresh token দিয়ে কাজ চালানো যাবে)
 		if (
 			(bkashIdTokenTTL <= 600 || !bkashIdToken) &&
 			bkashIdTokenTTL <= 600 &&
 			bkashRefreshToken &&
 			bkashRefreshTokenTTL > 600
 		) {
-			// ---------------------------------------------------------
-			// STEP 4.1: bKash Refresh Token API-তে request পাঠানো হচ্ছে
-			// Refresh Token ব্যবহার করে নতুন ID Token নেওয়ার জন্য
-			// ---------------------------------------------------------
+		// ------------------------------------------------------------------Refresh token-----------------------------------------------------------
 			const refreshTokenresponse = await fetch(
+				// tokenized/checkout/token/grant কপি করছি https://developer.bka.sh/docs/grant-token-3
 				`${config.bkash_base_url}/tokenized/checkout/token/refresh`,
 				{
 					method: "POST",
@@ -69,31 +51,26 @@ export const getBkashIdToken = async () => {
 					body: JSON.stringify({
 						app_key: config.bkash_app_key,
 						app_secret: config.bkash_app_secret,
-						refresh_token: bkashRefreshToken,
+						refresh_token: bkashRefreshToken, // পুরনো refresh token পাঠানো হচ্ছে
 					}),
 				},
 			);
 
-			// ---------------------------------------------------------
-			// STEP 4.2: bKash API request সফল হয়েছে কিনা যাচাই করা
-			// ---------------------------------------------------------
+			// Refresh Token না পাওয়া গেলে Error দিবে
 			if (!refreshTokenresponse.ok) {
 				throw new Error("Bkash Access Token Grant Failed");
 			}
 
-			// ---------------------------------------------------------
-			// STEP 4.3: bKash থেকে পাওয়া response JSON-এ convert করা
-			// এবং নতুন ID Token বের করা
-			// ---------------------------------------------------------
+			// bKash থেকে পাওয়া refreshTokenresponse json এ কনভার্ট
 			const bkashRefreshTokenResult = await refreshTokenresponse.json();
 			console.log("BKASH REFRESH RESPONSE:", bkashRefreshTokenResult);
 
+			// রিফ্রেশ Token দিয়ে পাওয়া id_token উপরের ভ্যারিয়েবলে রাখা হচ্ছে
 			bkashIdToken = bkashRefreshTokenResult.id_token as string;
 			console.log("NEW ID TOKEN:", bkashIdToken);
 
-			// ---------------------------------------------------------
-			// STEP 4.4: নতুন ID Token Redis-এ ১ ঘণ্টার জন্য সংরক্ষণ করা
-			// ---------------------------------------------------------
+
+			// Refresh Token মেয়াদ শেষ হওয়ার আগে আবার নতুন করে আবার 1 ঘন্টার জন্য রিফ্রিশ Token Redis-এ Set করা হচ্ছে
 			await redisclient.set(IdTokenkey, bkashIdToken, {
 				expiration: {
 					type: "EX",
@@ -101,30 +78,21 @@ export const getBkashIdToken = async () => {
 				},
 			});
 
-			// ---------------------------------------------------------
-			// STEP 4.5: নতুন ID Token return করা
-			// ---------------------------------------------------------
+			// নতুন টোকেনটি Return যাচ্ছে
 			return bkashIdToken;
 		}
 
-		// =========================================================
-		// STEP 5: ID Token-এর মেয়াদ ১০ মিনিটের বেশি থাকলে
-		//
-		// নতুন Token নেওয়ার কোনো প্রয়োজন নেই।
-		// Redis থেকে পাওয়া পুরোনো ID Token-ই return করা হবে।
-		// =========================================================
+		// ============ কেস ২: এখনো পুরনো ID Token ভ্যালিড আছে ============
+		// যদি ID Token-এর মেয়াদ ৬০০ সেকেন্ডের বেশি বাকি থাকে,
+		// তাহলে নতুন কিছু করার দরকার নেই — পুরনোটাই রিটার্ন করে দেওয়া হচ্ছে
 		if (bkashIdTokenTTL > 600) {
 			return bkashIdToken;
 		}
 
-		// =========================================================
-		// STEP 6: ID Token ব্যবহারযোগ্য নয় এবং Refresh Token দিয়েও
-		// নতুন ID Token নেওয়া সম্ভব নয়।
-		//
-		// তাই bKash Grant Token API ব্যবহার করে
-		// নতুন ID Token এবং Refresh Token নেওয়া হবে।
-		// =========================================================
-
+		// ============ কেস ৩: কোনো ভ্যালিড টোকেনই নেই (একদম প্রথমবার / দুটোরই মেয়াদ শেষ) ============
+		// এখানে bKash-এর "token grant" API কল করে একদম নতুন করে
+		// ID Token আর Refresh Token — দুটোই নেওয়া হচ্ছে (fresh login-এর মতো)
+		// tokenized/checkout/token/grant কপি করছি https://developer.bka.sh/docs/grant-token-3
 		const response = await fetch(
 			`${config.bkash_base_url}/tokenized/checkout/token/grant`,
 			{
@@ -142,27 +110,14 @@ export const getBkashIdToken = async () => {
 			},
 		);
 
-		// =========================================================
-		// STEP 7: bKash Grant Token API request সফল হয়েছে কিনা যাচাই
-		// =========================================================
 		if (!response.ok) {
 			throw new Error("Bkash Access Token Grant Failed");
 		}
-
-		// =========================================================
-		// STEP 8: bKash-এর response JSON-এ convert করা
-		//
-		// result.id_token
-		//      → নতুন ID Token
-		//
-		// result.refresh_token
-		//      → নতুন Refresh Token
-		// =========================================================
+       
+		// নতুন Token বানানোর ফাংশনটি Json এ কনভার্ট করা হচ্ছে
 		const result = await response.json();
 
-		// =========================================================
-		// STEP 9: নতুন ID Token Redis-এ ১ ঘণ্টার জন্য সংরক্ষণ করা
-		// =========================================================
+		//-------------- Bkash New token Set---------------
 		await redisclient.set(IdTokenkey, result.id_token, {
 			expiration: {
 				type: "EX",
@@ -170,9 +125,8 @@ export const getBkashIdToken = async () => {
 			},
 		});
 
-		// =========================================================
-		// STEP 10: নতুন Refresh Token Redis-এ ২৮ দিনের জন্য সংরক্ষণ করা
-		// =========================================================
+		// ---------------Refresh New Token Set--------------------------
+
 		await redisclient.set(RefreshTokenkey, result.refresh_token, {
 			expiration: {
 				type: "EX",
@@ -180,17 +134,11 @@ export const getBkashIdToken = async () => {
 			},
 		});
 
-		// =========================================================
-		// STEP 11: নতুন ID Token variable-এ রেখে
-		// সেটি return করা
-		// =========================================================
+		// উপরের ভ্যারিয়েবলে আবার নতুন token জমা হচ্ছে
 		bkashIdToken = result.id_token;
 
 		return bkashIdToken;
 	} catch (error: any) {
-		// =========================================================
-		// STEP 12: কোনো Error হলে Error Message সহ throw করা
-		// =========================================================
 		throw new Error(error.message);
 	}
 };

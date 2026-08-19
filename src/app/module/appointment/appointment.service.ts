@@ -1,3 +1,4 @@
+
 import config from "../../config";
 import { getBkashIdToken } from "../../lib/bkash";
 
@@ -25,7 +26,7 @@ const bookAppointment = async () => {
 				// agreementID: "TokenizedMerchant01L3IKB6H1565072174986", // appointment id
 				mode: "0011",
 				payerReference: "01723888888", //user email or phone number
-				callbackURL: `${config.bkash_base_url}/appointment/book-appointment/payment/callback`,
+				callbackURL: `${config.bkash_callback_url}/appointment/book-appointment/payment/callback`,
 				merchantAssociationInfo: "MI05MID54RF09123456One",
 				amount: "1200",
 				currency: "BDT",
@@ -40,6 +41,14 @@ const bookAppointment = async () => {
 	return bkashCreatePaymentResult;
 };
 
+const bookAppointmentCallback=()=>{
+    return{
+        success:true
+    }
+}
+
 export const AppointmentServices = {
 	bookAppointment,
+    bookAppointmentCallback
 };
+

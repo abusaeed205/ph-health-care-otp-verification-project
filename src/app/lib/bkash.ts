@@ -36,7 +36,7 @@ export const getBkashIdToken = async () => {
 			bkashRefreshToken &&
 			bkashRefreshTokenTTL > 600
 		) {
-		// ------------------------------------------------------------------Refresh token-----------------------------------------------------------
+			// ------------------------------------------------------------------Refresh token-----------------------------------------------------------
 			const refreshTokenresponse = await fetch(
 				// tokenized/checkout/token/grant কপি করছি https://developer.bka.sh/docs/grant-token-3
 				`${config.bkash_base_url}/tokenized/checkout/token/refresh`,
@@ -68,7 +68,6 @@ export const getBkashIdToken = async () => {
 			// রিফ্রেশ Token দিয়ে পাওয়া id_token উপরের ভ্যারিয়েবলে রাখা হচ্ছে
 			bkashIdToken = bkashRefreshTokenResult.id_token as string;
 			console.log("NEW ID TOKEN:", bkashIdToken);
-
 
 			// Refresh Token মেয়াদ শেষ হওয়ার আগে আবার নতুন করে আবার 1 ঘন্টার জন্য রিফ্রিশ Token Redis-এ Set করা হচ্ছে
 			await redisclient.set(IdTokenkey, bkashIdToken, {
@@ -113,7 +112,7 @@ export const getBkashIdToken = async () => {
 		if (!response.ok) {
 			throw new Error("Bkash Access Token Grant Failed");
 		}
-       
+
 		// নতুন Token বানানোর ফাংশনটি Json এ কনভার্ট করা হচ্ছে
 		const result = await response.json();
 

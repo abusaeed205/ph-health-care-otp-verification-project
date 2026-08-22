@@ -144,7 +144,19 @@ export const seedTesterDoctor = async () => {
 				password: hashedPassword,
 				role: Role.DOCTOR,
 				needPasswordChange: false,
-				emailVerified: true,
+				// emailVerified: true,
+				doctor: {
+					// model a এসব ডাটা আছে
+					create: {
+						email,
+						name,
+						address: "Dhaka, Bangladesh",
+						experienceYears: 5,
+						licenseNumber: "BMDC0000",
+						qualifications: "MBBS",
+						specialization: "Neurology",
+					},
+				},
 			},
 		});
 

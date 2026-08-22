@@ -5,7 +5,12 @@ import httpStatus from "http-status";
 import { AppointmentServices } from "./appointment.service";
 
 const bookAppointment = catchAsync(async (req: Request, res: Response) => {
-	const result = await AppointmentServices.bookAppointment();
+	const payload = req.body; //পরে +
+	const user = req.user!; //পরে +
+	// service পাঠাচ্ছি
+	const result = await AppointmentServices.bookAppointment(payload, user);
+
+	console.log("controler", result);
 
 	sendResponse(res, {
 		statusCode: httpStatus.OK,
@@ -15,19 +20,49 @@ const bookAppointment = catchAsync(async (req: Request, res: Response) => {
 	});
 });
 
+const payAppointment = catchAsync(async (req: Request, res: Response) => {
+	const payload = req.body; //পরে +
+	const user = req.user!; //পরে +
+	// service পাঠাচ্ছি
+	const result = await AppointmentServices.payAppointment(payload, user);
+
+	console.log("controler", result);
+
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		success: true,
+		message: "Appointment Payment Initiated successfully",
+		data: result,
+	});
+});
+
 const bookAppointmentcallback = catchAsync(
 	async (req: Request, res: Response) => {
-		console.log("req.query", req.query);
-		const { executedPaymentResult, redirecUrl } =
-			await AppointmentServices.bookAppointmentCallback(req.query);
-
-		console.log({ executedPaymentResult }, "callback controller");
-
+		const { redirecUrl } = await AppointmentServices.bookAppointmentCallback(
+			req.query,
+		);
 		res.redirect(redirecUrl);
 	},
 );
 
+const cancellAppointment = catchAsync(async (req: Request, res: Response) => {
+	const payload = req.body; //পরে +
+	// service পাঠাচ্ছি
+	const result = await AppointmentServices.cancelAppointment(payload);
+
+	console.log("controler", result);
+
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		success: true,
+		message: "Appointment Payment Initiated successfully",
+		data: result,
+	});
+});
+
 export const AppointMentController = {
 	bookAppointment,
+	payAppointment,
 	bookAppointmentcallback,
+	cancellAppointment,
 };

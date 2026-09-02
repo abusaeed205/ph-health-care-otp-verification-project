@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import httpStatus from "http-status";
 import { Prisma } from "../../generated/prisma/client";
 import config from "../config";
+import { AppError } from "../utils/appError";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const globalErrorHandler = async (
@@ -11,7 +12,7 @@ export const globalErrorHandler = async (
 	_next: NextFunction,
 ) => {
 	if (config.node_env === "development") {
-		console.log("Error from Global Error Handler", err);
+		console.log("Error from Global Error Handler", err);//-------------------------------
 	}
 
 	let statusCode: number = httpStatus.INTERNAL_SERVER_ERROR;
@@ -46,11 +47,15 @@ export const globalErrorHandler = async (
 	} else if (err instanceof Prisma.PrismaClientUnknownRequestError) {
 		statusCode = httpStatus.INTERNAL_SERVER_ERROR;
 		errorMessage = "Error occurred during query execution";
-	} else if (err instanceof Error) {
-		errorMessage = err.message;
+	} else if(err instanceof AppError){
+		errorMessage =err.message
+		statusCode=err.statusCode
+	}
+	else if (err instanceof Error) {
+		errorMessage = err.message
 	}
 
-	res.status(httpStatus.INTERNAL_SERVER_ERROR).json({
+	res.status(statusCode).json({
 		success: false,
 		statusCode: statusCode || httpStatus.INTERNAL_SERVER_ERROR,
 		name:

@@ -3,7 +3,7 @@ import { Request, Response } from "express";
 import { catchAsync } from "../../utils/catchAsync";
 import { sendResponse } from "../../utils/sendResponse";
 import { UserServices } from "./user.service";
-import { error } from "node:console";
+
 
 const uploadProfileImage = catchAsync(async (req: Request, res: Response) => {
 	console.log(req.file?.buffer, "req.file");

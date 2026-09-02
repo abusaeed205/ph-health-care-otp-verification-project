@@ -107,7 +107,7 @@ export const seedTesterAdmin = async () => {
 	}
 };
 
-// create tester doctor
+// // create tester doctor
 
 export const seedTesterDoctor = async () => {
 	try {

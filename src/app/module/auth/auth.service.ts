@@ -24,6 +24,8 @@ import { transporter } from "../../lib/nodemailler";
 import ejs from "ejs";
 import path from "path";
 import { TokenPayload } from "google-auth-library";
+import { AppError } from "../../utils/appError";
+import httpStatus from "http-status"
 
 const registerPatient = async (payload: IRegisterPatientPayload) => {
 	const { name, password, patient: patientData } = payload;
@@ -39,7 +41,7 @@ const registerPatient = async (payload: IRegisterPatientPayload) => {
 
 	const hashedPassword = await bcrypt.hash(password, 8);
 
-	// ----------OTP & Email ------------
+	// ----------OTP Redise এ সেট------------
 
 	const expirationMinutes = 5 * 60; // টাইমটা বলেদিতেছে কতো মিনিট থাকবে OTP
 	const otpkey = `patient-registration-otp:${email}`;
@@ -66,7 +68,7 @@ const registerPatient = async (payload: IRegisterPatientPayload) => {
 		patient: patientData,
 	};
 
-	// redisclient lib foulder থেকে আসতেছে এবং client DATA Set করছি
+	// client DATA রেডিসে Set করছি /redisclient lib থেকে আসতেছে
 	await redisclient.set(
 		patientRegistrationKey,
 		JSON.stringify(redisUserDataPayload),
@@ -97,7 +99,7 @@ const registerPatient = async (payload: IRegisterPatientPayload) => {
 
 	const html = await ejs.renderFile(tempatePath, templateData);
 
-	// Password Change করলে Gmail এ email যাবে
+	// এখানে Email Verification-এর জন্য email এ OTP পাঠানো হচ্ছে।
 	await transporter.sendMail({
 		// env config file থেকে আসতেছে
 		from: config.email_sender,
@@ -150,6 +152,7 @@ const verifyPatientEmail = async (payload: IVerifyEmailPayload) => {
 	if (!redisPatientData) {
 		throw new Error("Patient Doesnt Exist");
 	}
+
 	const patientPayload: IRegisterPatientPayload = JSON.parse(redisPatientData);
 
 	// এখান থেকে Data ডাটাবেইজে পাঠাচ্ছি
@@ -239,7 +242,7 @@ const loginUser = async (payload: ILoginUserPayload) => {
 	});
 
 	if (!user) {
-		throw new Error("User not found");
+		throw new AppError(httpStatus.NOT_FOUND,"user Not Found");
 	}
 
 	if (user.status === UserStatus.BLOCKED) {
@@ -290,6 +293,7 @@ const loginUser = async (payload: ILoginUserPayload) => {
 	};
 };
 
+// Frontend-এ Login করা User তার নিজের Profile Data দেখার জন্য এটা বানানো
 const getMe = async (user: IRequestUser) => {
 	const isUserExists = await prisma.user.findUnique({
 		where: {
@@ -364,12 +368,14 @@ const googleLogin = async (payload: IGoogleLoginPayload) => {
 	//  google-auth-library থেকে TokenPayload পাই
 	let googleIdTokenPayload: TokenPayload | null | undefined = null;
 
+	//  Check করা হচ্ছে Token-টি আমাদের Application-এর জন্যই তৈরি হয়েছে কি না।
 	try {
+		//googleclient lib থেকে পাই
 		const ticket = await googleclient.verifyIdToken({
-			idToken: payload.idToken,
-			audience: config.google_client_id,
+			idToken: payload.idToken, //Frontend থেকে পা
+			audience: config.google_client_id, //env থেকে পাই
 		});
-		googleIdTokenPayload = ticket.getPayload();
+		googleIdTokenPayload = ticket.getPayload(); //(getPayload)google-auth-library
 	} catch (error) {
 		console.log("Google Id Token verification error:", error);
 		throw new Error("Invalid Google ID Token");
@@ -385,7 +391,7 @@ const googleLogin = async (payload: IGoogleLoginPayload) => {
 	if (!googleIdTokenPayload.name) {
 		throw new Error("Name not found in Google ID Token payload");
 	}
-
+	//check Database এ আগে থেকে user আছে কি
 	const ifPatientExistsWithGoogleAuth = await prisma.user.findUnique({
 		where: {
 			email: googleIdTokenPayload.email,
@@ -394,9 +400,14 @@ const googleLogin = async (payload: IGoogleLoginPayload) => {
 		},
 	});
 
+	//  থাকলে user কে এখানে রাখবো
 	let user = ifPatientExistsWithGoogleAuth;
-	// create a new user if not exists
+
+	// যদি Google Accoutnt নাই কিন্তু Credential Account ‍থাকতে পারে
 	if (!ifPatientExistsWithGoogleAuth) {
+		// তাই এখানে আবার ডাটাবেইসে chack দিবো Credential Account আছে কি না
+		// if থাকে Credential Account এর সাথে google account যুক্ত করবো
+		// else না থাকলে নতুন একাউন্ট বানাবো
 		const ifpatientExistWithCredential = await prisma.user.findUnique({
 			where: {
 				email: googleIdTokenPayload.email,
@@ -404,6 +415,7 @@ const googleLogin = async (payload: IGoogleLoginPayload) => {
 				authProvider: AuthProvider.CREDENTIALS,
 			},
 		});
+
 		if (ifpatientExistWithCredential) {
 			if (!ifpatientExistWithCredential.emailVerified) {
 				throw new Error(
@@ -420,8 +432,10 @@ const googleLogin = async (payload: IGoogleLoginPayload) => {
 			) {
 				throw new Error("User is deleted");
 			}
+			// সব ঠিক থাকলে সেই Credential User-এর সাথে Google Account Connect করবো।
 			user = await prisma.user.update({
 				where: {
+					//Credential id
 					id: ifpatientExistWithCredential.id,
 				},
 				data: {
@@ -476,6 +490,7 @@ const googleLogin = async (payload: IGoogleLoginPayload) => {
 		}
 	}
 
+	// যদি Credential Account ‍ও না থাকে Google Accoutnt ও না থাকে
 	if (!user) {
 		throw new Error("User not found or created");
 	}

@@ -4,6 +4,7 @@ import { catchAsync } from "../../utils/catchAsync";
 import { sendResponse } from "../../utils/sendResponse";
 import type { IRequestUser } from "./auth.interface";
 import { AuthService } from "./auth.service";
+import config from "../../config";
 
 // user Register
 const registerPatient = catchAsync(async (req: Request, res: Response) => {
@@ -25,14 +26,14 @@ const verifyPatientEmail = catchAsync(async (req: Request, res: Response) => {
 
 	res.cookie("accessToken", accessToken, {
 		httpOnly: true,
-		secure: false,
-		sameSite: "none",
+		secure:config.node_env ==="development"? false:true,
+		sameSite:config.node_env ==="development"? "lax":"none", // none ব্যবহার করলে forntend এ কুকি আসবে না 
 		maxAge: 1000 * 60 * 60 * 24, // 24 hour or 1 day
 	});
 	res.cookie("refreshToken", refreshToken, {
 		httpOnly: true,
-		secure: false,
-		sameSite: "none",
+		secure:config.node_env ==="development"? false:true,
+		sameSite:config.node_env ==="development"? "lax":"none", // none ব্যবহার করলে forntend এ কুকি আসবে না 
 		maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
 	});
 
@@ -91,8 +92,8 @@ const loginUser = catchAsync(async (req: Request, res: Response) => {
 	// Access Token Cookie হিসেবে Browser-এ পাঠানো হচ্ছে
 	res.cookie("accessToken", accessToken, {
 		httpOnly: true,
-		secure: false,
-		sameSite: "none",
+		secure:config.node_env ==="development"? false:true,
+		sameSite:config.node_env ==="development"? "lax":"none", // none ব্যবহার করলে forntend এ কুকি আসবে না 
 		// তাই এখানে Cookie-এর lifetime = 24 ঘণ্টা।
 		maxAge: 1000 * 60 * 60 * 24,
 	});
@@ -103,8 +104,8 @@ const loginUser = catchAsync(async (req: Request, res: Response) => {
 		// JavaScript থেকে cookie access করা যাবে না।
 		httpOnly: true,
 		// Production-এ HTTPS থাকলে true হওয়া উচিত।
-		secure: false,
-		sameSite: "none",
+		secure:config.node_env ==="development"? false:true,
+		sameSite:config.node_env ==="development"? "lax":"none", // none ব্যবহার করলে forntend এ কুকি আসবে না 
 		maxAge: 1000 * 60 * 60 * 24 * 7,
 	});
 
@@ -148,14 +149,14 @@ const refreshToken = catchAsync(async (req: Request, res: Response) => {
 
 	res.cookie("accessToken", accessToken, {
 		httpOnly: true,
-		secure: false,
-		sameSite: "none",
+		secure:config.node_env ==="development"? false:true,
+		sameSite:config.node_env ==="development"? "lax":"none", // none ব্যবহার করলে forntend এ কুকি আসবে না 
 		maxAge: 1000 * 60 * 60 * 24, // 24 hour or 1 day
 	});
 	res.cookie("refreshToken", newRefreshToken, {
 		httpOnly: true,
-		secure: false,
-		sameSite: "none",
+		secure:config.node_env ==="development"? false:true,
+		sameSite:config.node_env ==="development"? "lax":"none", // none ব্যবহার করলে forntend এ কুকি আসবে না 
 		maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
 	});
 
@@ -179,14 +180,14 @@ const googleLoginController = catchAsync(
 
 		res.cookie("accessToken", accessToken, {
 			httpOnly: true,
-			secure: false,
-			sameSite: "none",
+			secure:config.node_env ==="development"? false:true,
+		    sameSite:config.node_env ==="development"? "lax":"none", // none ব্যবহার করলে forntend এ কুকি আসবে না 
 			maxAge: 1000 * 60 * 60 * 24, // 24 hour or 1 day
 		});
 		res.cookie("refreshToken", refreshToken, {
 			httpOnly: true,
-			secure: false,
-			sameSite: "none",
+			secure:config.node_env ==="development"? false:true,
+		    sameSite:config.node_env ==="development"? "lax":"none", // none ব্যবহার করলে forntend এ কুকি আসবে না 
 			maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
 		});
 
@@ -228,6 +229,22 @@ const resetPassword = catchAsync(async (req: Request, res: Response) => {
 	});
 });
 
+const logOutFunction = catchAsync(async (req: Request, res: Response) => {
+	
+
+	res.clearCookie("accessToken")
+	res.clearCookie("refreshToken")
+
+
+
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		success: true,
+		message: "user logout Successfully",
+		data: null,
+	});
+});
+
 export const AuthController = {
 	registerPatient,
 	verifyPatientEmail,
@@ -237,4 +254,5 @@ export const AuthController = {
 	googleLoginController,
 	forgetPassword,
 	resetPassword,
+	logOutFunction
 };

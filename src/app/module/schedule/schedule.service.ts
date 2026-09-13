@@ -3,7 +3,7 @@ import { prisma } from "../../lib/prisma"
 import { RequestUser } from "../../middleware/checkAuth"
 import { AppError } from "../../utils/appError"
 import { ICreateSchedulePayload, IUpdateSchedulePayload } from "./schedule.interface"
-import httpStatus, { status } from "http-status"
+import httpStatus from "http-status"
 import { IPostQuery } from "../../interface"
 import { ScheduleWhereInput } from "../../../generated/prisma/models"
 import { Schedulestatus } from "../../../generated/prisma/enums"
@@ -82,7 +82,7 @@ const createSchedule=async(payload:ICreateSchedulePayload,user:RequestUser)=>{
 }
 
 
-const getMySchedules=async(query:IPostQuery,user:RequestUser){
+const getMySchedules=async(query:IPostQuery,user:RequestUser)=>{
 
     // পেজিনেশন 
     const limit = query.limit ? Number(query.limit) : 10;
@@ -154,7 +154,7 @@ const getMySchedules=async(query:IPostQuery,user:RequestUser){
 }
 
 
-const getAllSchedule=async(query:IPostQuery){
+const getAllSchedule=async(query:IPostQuery)=>{
         // পেজিনেশন 
     const limit = query.limit ? Number(query.limit) : 10;
     const page = query.page ? Number(query.page) : 1;

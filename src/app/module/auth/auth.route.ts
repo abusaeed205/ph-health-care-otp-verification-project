@@ -36,4 +36,9 @@ router.post(
 	validateRequest(ZodUserValidation.resetPasswordZodSchema),
 	AuthController.resetPassword,
 );
+
+router.post(
+	"/logout",
+	AuthController.logOutFunction
+);
 export const AuthRoutes = router;

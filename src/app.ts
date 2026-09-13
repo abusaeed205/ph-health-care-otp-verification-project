@@ -11,7 +11,7 @@ import config from "./app/config";
 import { globalErrorHandler } from "./app/middleware/globalErrorHandler";
 import { notFound } from "./app/middleware/notFound";
 import { AuthRoutes } from "./app/module/auth/auth.route";
-import { UserRoutes } from "./app/module/user'/user.route";
+import { UserRoutes } from "./app/module/user/user.route";
 import { getBkashIdToken } from "./app/lib/bkash";
 import { appointmentRoutes } from "./app/module/appointment/appointment.route";
 import { DoctorRoutes } from "./app/module/doctor/doctor.route";

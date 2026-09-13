@@ -164,7 +164,7 @@ export const seedTesterDoctor = async () => {
 	} catch (error) {
 		console.log("Error Seeding Tester Doctor : ", error);
 
-		await prisma.user.delete({
+		await prisma.user.deleteMany({
 			where: {
 				email: config.tester_doctor_email,
 			},

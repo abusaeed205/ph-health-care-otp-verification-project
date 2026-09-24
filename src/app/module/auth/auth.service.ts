@@ -26,6 +26,7 @@ import path from "path";
 import { TokenPayload } from "google-auth-library";
 import { AppError } from "../../utils/appError";
 import httpStatus from "http-status"
+import { email } from "zod";
 
 const registerPatient = async (payload: IRegisterPatientPayload) => {
 	const { name, password, patient: patientData } = payload;
@@ -44,8 +45,15 @@ const registerPatient = async (payload: IRegisterPatientPayload) => {
 	// ----------OTP Redise এ সেট------------
 
 	const expirationMinutes = 5 * 60; // টাইমটা বলেদিতেছে কতো মিনিট থাকবে OTP
+
 	const otpkey = `patient-registration-otp:${email}`;
 	const otpValue = crypto.randomInt(100000, 1000000).toString(); // crypto দিয়ে Random OTP বানাচ্ছি
+
+	// frontand এর জন্য 
+	if(config.node_env === "development"){
+		console.log(`register patient (service):[dev] OTP ${email}:${otpValue}`)
+	}
+
 
 	// redisclient lib foulder থেকে আসতেছে এবং clien email and OTP  Set করছি
 	await redisclient.set(otpkey, otpValue, {
@@ -366,13 +374,13 @@ const refreshToken = async (token: string) => {
 // Google Login Fuction
 const googleLogin = async (payload: IGoogleLoginPayload) => {
 	//  google-auth-library থেকে TokenPayload পাই
-	let googleIdTokenPayload: TokenPayload | null | undefined = null;
+	let googleIdTokenPayload: TokenPayload | undefined;
 
-	//  Check করা হচ্ছে Token-টি আমাদের Application-এর জন্যই তৈরি হয়েছে কি না।
+    //  Check করা হচ্ছে Token-টি আমাদের Application-এর জন্যই তৈরি হয়েছে কি না।
 	try {
 		//googleclient lib থেকে পাই
 		const ticket = await googleclient.verifyIdToken({
-			idToken: payload.idToken, //Frontend থেকে পা
+			idToken: payload.idToken, //Frontend থেকে পাই
 			audience: config.google_client_id, //env থেকে পাই
 		});
 		googleIdTokenPayload = ticket.getPayload(); //(getPayload)google-auth-library
@@ -384,93 +392,74 @@ const googleLogin = async (payload: IGoogleLoginPayload) => {
 	if (!googleIdTokenPayload) {
 		throw new Error("Invalid Google ID Token payload");
 	}
-
 	if (!googleIdTokenPayload.email) {
 		throw new Error("Email not found in Google ID Token payload");
 	}
 	if (!googleIdTokenPayload.name) {
 		throw new Error("Name not found in Google ID Token payload");
 	}
-	//check Database এ আগে থেকে user আছে কি
-	const ifPatientExistsWithGoogleAuth = await prisma.user.findUnique({
-		where: {
-			email: googleIdTokenPayload.email,
-			role: Role.PATIENT,
-			googleId: googleIdTokenPayload.sub,
-		},
-	});
+	if (!googleIdTokenPayload.email_verified) {
+		throw new Error("Google email is not verified");
+	}
+ 
+	// payload থেকে Data ডিচট্রাকচার করছি 
+	const { email, name, sub: googleId } = googleIdTokenPayload;
+	//check Database এ আগে থেকে user আছে কি 
+	const existingUser = await prisma.user.findUnique({ where: { email } });
 
-	//  থাকলে user কে এখানে রাখবো
-	let user = ifPatientExistsWithGoogleAuth;
+	let user: NonNullable<typeof existingUser>;
+	let isNewUser = false;
 
-	// যদি Google Accoutnt নাই কিন্তু Credential Account ‍থাকতে পারে
-	if (!ifPatientExistsWithGoogleAuth) {
-		// তাই এখানে আবার ডাটাবেইসে chack দিবো Credential Account আছে কি না
-		// if থাকে Credential Account এর সাথে google account যুক্ত করবো
-		// else না থাকলে নতুন একাউন্ট বানাবো
-		const ifpatientExistWithCredential = await prisma.user.findUnique({
-			where: {
-				email: googleIdTokenPayload.email,
+	if (existingUser) {
+		if (existingUser.status === UserStatus.BLOCKED) {
+			throw new Error("User is blocked");
+		}
+		if (existingUser.isDeleted || existingUser.status === UserStatus.DELETED) {
+			throw new Error("User is deleted");
+		}
+
+		if (existingUser.googleId === googleId) {
+			user = existingUser;
+		} else if (existingUser.googleId) {
+	
+			throw new Error("This email is linked to a different Google account");
+		} else {
+
+			if (!existingUser.emailVerified) {
+				throw new Error("Email is not verified, please verify your email first");
+			}
+			user = await prisma.user.update({
+				where: { id: existingUser.id },
+				data: {
+					googleId,
+					authProvider: AuthProvider.GOOGLE,
+					emailVerified: true,
+				},
+			});
+		}
+	} else {
+		user = await prisma.user.create({
+			data: {
+				email,
+				name,
 				role: Role.PATIENT,
-				authProvider: AuthProvider.CREDENTIALS,
+				googleId,
+				authProvider: AuthProvider.GOOGLE,
+				emailVerified: true,
+				patient: { create: { name, email } },
 			},
 		});
+		isNewUser = true;
+	}
 
-		if (ifpatientExistWithCredential) {
-			if (!ifpatientExistWithCredential.emailVerified) {
-				throw new Error(
-					"Email is not verified, please verify your email first",
-				);
-			}
+	//-----Google Register Auto Email Send----------------  
 
-			if (ifpatientExistWithCredential.status === UserStatus.BLOCKED) {
-				throw new Error("User is blocked");
-			}
-			if (
-				ifpatientExistWithCredential.isDeleted ||
-				ifpatientExistWithCredential.status === UserStatus.DELETED
-			) {
-				throw new Error("User is deleted");
-			}
-			// সব ঠিক থাকলে সেই Credential User-এর সাথে Google Account Connect করবো।
-			user = await prisma.user.update({
-				where: {
-					//Credential id
-					id: ifpatientExistWithCredential.id,
-				},
-				data: {
-					googleId: googleIdTokenPayload.sub,
-					authProvider: AuthProvider.GOOGLE,
-					emailVerified: true,
-				},
-			});
-		} else {
-			// Google Registered user exists
-			user = await prisma.user.create({
-				data: {
-					email: googleIdTokenPayload.email,
-					name: googleIdTokenPayload.name,
-					role: Role.PATIENT,
-					googleId: googleIdTokenPayload.sub,
-					authProvider: AuthProvider.GOOGLE,
-					emailVerified: true,
-					patient: {
-						create: {
-							name: googleIdTokenPayload.name,
-							email: googleIdTokenPayload.email,
-						},
-					},
-				},
-			});
-
-			//-----Google Register Auto Email Send----------------
-
-			// যে ফাইলটাতে ejs কোড রাখা আছে সেটা এটার সাথে Join দিলাম
+	if (isNewUser) {
+		try {
 			const tempatePath = path.join(
 				process.cwd(),
 				"src/app/templates/patient-welcome-email.ejs",
 			);
-
 			// email massage temp formet
 			const templateData = {
 				name: user.name,
@@ -487,20 +476,11 @@ const googleLogin = async (payload: IGoogleLoginPayload) => {
 				subject: "Email Verification",
 				html,
 			});
+		} catch (err) {
+			console.log("Welcome email failed:", err);
 		}
 	}
 
-	// যদি Credential Account ‍ও না থাকে Google Accoutnt ও না থাকে
-	if (!user) {
-		throw new Error("User not found or created");
-	}
-
-	if (user.status === UserStatus.BLOCKED) {
-		throw new Error("User is blocked");
-	}
-	if (user.isDeleted || user.status === UserStatus.DELETED) {
-		throw new Error("User is deleted");
-	}
 
 	const jwtPayload = {
 		userId: user.id,
@@ -521,11 +501,9 @@ const googleLogin = async (payload: IGoogleLoginPayload) => {
 		config.jwt_refresh_expires_in as SignOptions,
 	);
 
-	return {
-		accessToken,
-		refreshToken,
-	};
+	return { accessToken, refreshToken };
 };
+
 
 const forgetPassword = async (payload: IForgotPasswordPayload) => {
 	const { email } = payload;

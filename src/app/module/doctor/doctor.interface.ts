@@ -27,7 +27,7 @@ export interface IVerifyDoctorEmailPayload {
 export interface IApproveDoctorPayload {
     doctorId: string;
     verificationStatus: DoctorVerificationStatus;
-    rejectionReason: string;
+    rejectionRespon: string;
 }
 
 export interface IUpdateDoctorProfilePayload {

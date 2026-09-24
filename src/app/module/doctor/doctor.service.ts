@@ -25,20 +25,26 @@ import { IPostQuery } from "../../interface";
 import { DoctorWhereInput } from "../../../generated/prisma/models";
 import { AppError } from "../../utils/appError";
 import { addDays, startOfDay } from "date-fns";
+import generateRandomPassword from "../../utils/randomPassword";
 
 const applyAsDoctor = async (
 	payload: IApplyAsDoctorPayload,
 	resume: Express.Multer.File | null,
 	additionalFiles: Express.Multer.File[],
 ) => {
-	const isUserExist = await prisma.user.findUnique({
+		// আগের user কে তার doctor profile সহ খুঁজে বের করছি
+	const existingUser = await prisma.user.findUnique({
 		where: {
 			email: payload.user.email,
 		},
+		include: {
+			doctor: true,
+		},
 	});
 
-	if (isUserExist) {
-		throw new Error("User Allready Exists With This Email");
+	// যদি user থাকে এবং তার সাথে আগে থেকেই doctor profile attached থাকে
+	if (existingUser?.doctor) {
+		throw new Error("You Have Already Applied As A Doctor With This Email");
 	}
 
 	//শৃুধু মত্র resume → একবার upload
@@ -100,41 +106,75 @@ const applyAsDoctor = async (
 	);
 
 	// Generate random password
-	const randomDoctorPassword = Math.random().toString(36).slice(-8);
-	const hashedPassword = await bcrypt.hash(
-		randomDoctorPassword,
-		Number(config.bcrypt_salt_rounds),
-	);
+	// const randomDoctorPassword = Math.random().toString(36).slice(-8);
+	// const hashedPassword = await bcrypt.hash(
+	// 	randomDoctorPassword,
+	// 	Number(config.bcrypt_salt_rounds),
+	// );
 
-	// Create User + Doctor
+
+	// Create User + Doctor / অথবা existing user এর উপর Doctor profile attach
 	// এখানে এক সাথে  user & doctor এর ডাটা Create হচ্ছে
-	//   এটা মাল্টি ভেন্ডর ওয়েব সাইটে এ কাজে দিবে
-	const doctorApplication = await prisma.user.create({
-		data: {
-			...payload.user, //user data
-			password: hashedPassword,
-			role: Role.DOCTOR,
-			needPasswordChange: true,
-			doctor: {
-				//doctor data
-				create: {
-					name: payload.user.name,
-					email: payload.user.email,
-					...payload.doctor,
-					address: payload.doctor.address ?? "",
-					resume: resumeUploadResult.secure_url,
-					resumePublicId: resumeUploadResult.public_id,
-					additionalFiles: additionalFilesUploadResult.map((file) => ({
-						url: file.secure_url,
-						publicId: file.public_id,
-					})),
+	//   এটা মাল্টি ভেন্ডর ওয়েব সাইটে এ কাজে দিবে
+	let doctorApplication: Awaited<ReturnType<typeof prisma.user.update>>;
+
+	if (existingUser) {
+		// আগে থেকে user (patient/অন্য role) হিসেবে account থাকলে
+		// সেই একই user এর উপর update করে doctor profile attach করছি
+		doctorApplication = await prisma.user.update({
+			where: {
+				id: existingUser.id,
+			},
+			data: {
+				role: Role.DOCTOR,
+				needPasswordChange: false, // আগের password ই থাকবে
+				doctor: {
+					create: {
+						name: payload.user.name,
+						email: payload.user.email,
+						...payload.doctor,
+						address: payload.doctor.address ?? "",
+						resume: resumeUploadResult.secure_url,
+						resumePublicId: resumeUploadResult.public_id,
+						additionalFiles: additionalFilesUploadResult.map((file) => ({
+							url: file.secure_url,
+							publicId: file.public_id,
+						})),
+					},
 				},
 			},
-		},
-		include: {
-			doctor: true,
-		},
-	});
+			include: {
+				doctor: true,
+			},
+		});
+	} else {
+		// একেবারে নতুন user হলে
+		doctorApplication = await prisma.user.create({
+			data: {
+				...payload.user, //user data
+				role: Role.DOCTOR,
+				needPasswordChange: true,
+				doctor: {
+					//doctor data
+					create: {
+						name: payload.user.name,
+						email: payload.user.email,
+						...payload.doctor,
+						address: payload.doctor.address ?? "",
+						resume: resumeUploadResult.secure_url,
+						resumePublicId: resumeUploadResult.public_id,
+						additionalFiles: additionalFilesUploadResult.map((file) => ({
+							url: file.secure_url,
+							publicId: file.public_id,
+						})),
+					},
+				},
+			},
+			include: {
+				doctor: true,
+			},
+		});
+	}
 
 	// ------------------------------OTP SET ------------------
 
@@ -151,18 +191,22 @@ const applyAsDoctor = async (
 	});
 
 	//-------------------------- Email send ----------------------
+	// আগে থেকে email verified থাকলে এই ধাপ পুরোপুরি স্কিপ হবে
+	const isAlreadyEmailVerified = existingUser?.emailVerified === true;
 
+	if (!isAlreadyEmailVerified) {
+		
 	// যে ফাইলটাতে ejs কোড রাখা আছে সেটা এটার সাথে Join দিলাম
 	const tempatePath = path.join(
 		process.cwd(),
 		"src/app/templates/forgot-password.ejs",
 	);
 
-	// email massage temp formet / playload থেকে ডাটা নিয়ে বসাচ্ছি
+	// email massage temp formet / playload থে কে ডাটা নিয়ে বসাচ্ছি
 	const templateData = {
 		name: payload.user.name,
 		email: payload.user.email,
-		otp: otpvalue, // OTP এখানে যেভাবে লিখবো templates/forgot-password.ejs এ সেইম থাকবে
+		OTP: otpvalue, // OTP এখানে যেভাবে লিখবো templates/forgot-password.ejs এ সেইম থাকবে
 		expirationMinutes: expirationSeconds / 60,
 	};
 
@@ -179,6 +223,7 @@ const applyAsDoctor = async (
 
 	return doctorApplication;
 };
+}
 
 const verifyDoctorEmail = async (payload: IVerifyDoctorEmailPayload) => {
 	const otp = payload.otp;
@@ -192,7 +237,7 @@ const verifyDoctorEmail = async (payload: IVerifyDoctorEmailPayload) => {
 		throw new Error("Doctor Application Not Found.please Apply Again.");
 	}
 
-	if (!existingUser.emailVerified) {
+	if (existingUser.emailVerified) {
 		throw new Error("Email Already Verified");
 	}
 
@@ -224,93 +269,107 @@ const verifyDoctorEmail = async (payload: IVerifyDoctorEmailPayload) => {
 };
 
 const approveDoctor = async (
-	payload: IApproveDoctorPayload,
-	reviewer: RequestUser,
+  payload: IApproveDoctorPayload,
+  reviewer: RequestUser,
 ) => {
-	const { doctorId, verificationStatus, rejectionReason } = payload;
+  const { doctorId, verificationStatus, rejectionRespon} = payload;
 
-	const existingDoctor = await prisma.doctor.findUnique({
-		where: { id: doctorId },
-		include: { user: true },
-	});
+  const existingDoctor = await prisma.doctor.findUnique({
+    where: { id: doctorId },
+    include: { user: true },
+  });
 
-	if (!existingDoctor) {
-		throw new Error("Doctor Application Not Found");
-	}
+  if (!existingDoctor) {
+    throw new AppError(httpStatus.NOT_FOUND, "Doctor Application Not Found");
+  }
 
-	if (!existingDoctor.isDeleted) {
-		throw new Error("Doctor Application has Been Delete");
-	}
+  if (existingDoctor.isDeleted) {
+    throw new AppError(httpStatus.GONE, "Doctor Application Has Been Deleted");
+  }
 
-	if (!existingDoctor.user.emailVerified) {
-		throw new Error(
-			"Doctor Hos Not Verified Their Email Yet.Application Cannot Be Reviewed.",
-		);
-	}
+  if (!existingDoctor.user.emailVerified) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      "Doctor Has Not Verified Their Email Yet. Application Cannot Be Reviewed.",
+    );
+  }
 
-	if (existingDoctor.verificationStatus !== DoctorVerificationStatus.PANDING) {
-		throw new Error(
-			`Doctor Application Has Already Been ${existingDoctor.verificationStatus.toLowerCase()}`,
-		);
-	}
+  if (existingDoctor.verificationStatus !== DoctorVerificationStatus.PANDING) {
+    throw new AppError(
+      httpStatus.CONFLICT,
+      `Doctor Application Has Already Been ${existingDoctor.verificationStatus.toLowerCase()}`,
+    );
+  }
 
-	if (
-		verificationStatus === DoctorVerificationStatus.REJECTED &&
-		!rejectionReason
-	) {
-		throw new Error(
-			// httpStatus.BAD_REQUEST,
-			"Rejection Reason Is Required When Rejecting A Doctor Application",
-		);
-	}
+  if (
+    verificationStatus === DoctorVerificationStatus.REJECTED &&
+    !rejectionRespon
+  ) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      "Rejection Reason Is Required When Rejecting A Doctor Application",
+    );
+  }
 
-	// Approve Data Update
-	const updatedDoctor = await prisma.doctor.update({
-		where: { id: doctorId },
-		data: {
-			verificationStatus,
-			rejectionReason:
-				verificationStatus === DoctorVerificationStatus.REJECTED
-					? rejectionReason
-					: null,
-			reviewedBy: reviewer.userId, //যে Admin doctor request accept করবে তার নাম এখানে দেখাবে
-			reviewedAt: new Date(), // এবং তারিখ দেখাবে
-		},
-	});
+  const isApproved = verificationStatus === DoctorVerificationStatus.APPROVED;
 
-	// -----------------------Email send ------------------
-	// Doctor application Reject or Approve হলে Email যাবে
+  const randomDoctorPassword = isApproved
+    ? generateRandomPassword()
+    : undefined;
 
-	const isApproved = verificationStatus === DoctorVerificationStatus.APPROVED;
-	// যদি doctor account Approve হয় তাহলে doctor-approved-application.ejs যাবে
-	// তা না হলে Rejected হবে এবং  doctor-Rejected-application.ejs যাবে
-	const tempatePath = path.join(
-		process.cwd(),
-		`src/app/templates/${
-			isApproved
-				? "doctor-approved-application.ejs"
-				: "doctor-rejected-application.ejs"
-		}`,
-	);
+  if (config.node_env === "development" && randomDoctorPassword) {
+    console.log(`[dev] Random Password plain text: ${randomDoctorPassword}`);
+  }
 
-	const templateData = {
-		name: updatedDoctor.name,
-		reason: updatedDoctor.rejectionRespon,
-	};
+  const hashedPassword = randomDoctorPassword
+    ? await bcrypt.hash(randomDoctorPassword, Number(config.bcrypt_salt_rounds))
+    : undefined;
 
-	const html = await ejs.renderFile(tempatePath, templateData);
+  const updatedDoctor = await prisma.doctor.update({
+    where: { id: doctorId },
+    data: {
+      verificationStatus,
+      rejectionRespon:
+        verificationStatus === DoctorVerificationStatus.REJECTED
+          ? rejectionRespon
+          : null,
+      reviewedBy: reviewer.userId,
+      reviewedAt: new Date(),
+      ...(hashedPassword
+        ? { user: { update: { password: hashedPassword } } }
+        : {}),
+    },
+  });
 
-	await transporter.sendMail({
-		from: config.email_sender,
-		to: updatedDoctor.email,
-		subject: isApproved
-			? "Your Doctor Application Has Been Approved"
-			: "Your Doctor Application Has Been Rejected",
-		html,
-	});
+  const tempatePath = path.join(
+    process.cwd(),
+    `src/app/templates/${
+      isApproved
+        ? "doctor-approved-application.ejs"
+        : "doctor-rejected-application.ejs"
+    }`,
+  );
 
-	return updatedDoctor;
+  const templateData = {
+    name: updatedDoctor.name,
+    reason: updatedDoctor.rejectionRespon,
+    password: isApproved ? randomDoctorPassword : undefined,
+  };
+
+  const html = await ejs.renderFile(tempatePath, templateData);
+
+  await transporter.sendMail({
+    from: config.email_sender,
+    to: updatedDoctor.email,
+    subject: isApproved
+      ? "Your Doctor Application Has Been Approved"
+      : "Your Doctor Application Has Been Rejected",
+    html,
+  });
+
+  return updatedDoctor;
 };
+
 
 const getAllDoctors = async (query: IPostQuery) => {
 	
@@ -478,8 +537,9 @@ const getAvailableDoctorByTodaysSchedule = async (query: IPostQuery) => {
 					startDateTime: {
 						gte: startOfToday,
 						lt: startOfTomorrow,
-						gt: now,
+						
 					},
+					endDateTime:{gt: now}
 				} } },
 	];
 
@@ -528,10 +588,10 @@ const getAvailableDoctorByTodaysSchedule = async (query: IPostQuery) => {
 					startDateTime: {
 						gte: startOfToday,
 						lt: startOfTomorrow,
-						gt: now,
 					},
+					endDateTime:{gt: now}
 				},
-				orderBy: { [sortBy] : sortOrder },
+				orderBy: {startDateTime:"desc"},
 				select: {
 					id: true,
 					startDateTime: true,

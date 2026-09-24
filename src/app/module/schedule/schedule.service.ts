@@ -453,8 +453,8 @@ const getTodaysSchedul=async(query:IPostQuery)=>{
             startDateTime: {
                 gte: startOfToday,
                 lt: startOfTomorrow,
-                gt: now,
             },
+            endDateTime:{gt: now}
         },
         {
             availableslots:{gt:0}

@@ -44,6 +44,7 @@ const getAllSchedules = catchAsync(async (req: Request, res: Response) => {
 
 const getTodaysSchedules = catchAsync(async (req: Request, res: Response) => {
     const { data, meta } = await ScheduleServices.getTodaysSchedul(req.query);
+    console.log(req.query)
     sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,

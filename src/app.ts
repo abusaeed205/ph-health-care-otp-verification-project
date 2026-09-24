@@ -22,12 +22,23 @@ import { AnalyticsRoutes } from "./app/module/analytics/analytics.route";
 
 const app: Application = express();
 
+// app.use(
+// 	cors({
+// 		origin: config.frontend_url,
+// 		credentials: true,
+// 	}),
+// );
+
 app.use(
-	cors({
-		origin: config.frontend_url,
-		credentials: true,
-	}),
+  cors({
+    origin:config.frontend_url,
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
 );
+
+
 
 // Enable URL-encoded form data parsing
 app.use(express.urlencoded({ extended: true }));

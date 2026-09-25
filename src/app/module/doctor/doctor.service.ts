@@ -32,7 +32,7 @@ const applyAsDoctor = async (
 	resume: Express.Multer.File | null,
 	additionalFiles: Express.Multer.File[],
 ) => {
-		// আগের user কে তার doctor profile সহ খুঁজে বের করছি
+	// আগের user কে তার doctor profile সহ খুঁজে বের করছি
 	const existingUser = await prisma.user.findUnique({
 		where: {
 			email: payload.user.email,
@@ -111,7 +111,6 @@ const applyAsDoctor = async (
 	// 	randomDoctorPassword,
 	// 	Number(config.bcrypt_salt_rounds),
 	// );
-
 
 	// Create User + Doctor / অথবা existing user এর উপর Doctor profile attach
 	// এখানে এক সাথে  user & doctor এর ডাটা Create হচ্ছে
@@ -195,35 +194,34 @@ const applyAsDoctor = async (
 	const isAlreadyEmailVerified = existingUser?.emailVerified === true;
 
 	if (!isAlreadyEmailVerified) {
-		
-	// যে ফাইলটাতে ejs কোড রাখা আছে সেটা এটার সাথে Join দিলাম
-	const tempatePath = path.join(
-		process.cwd(),
-		"src/app/templates/forgot-password.ejs",
-	);
+		// যে ফাইলটাতে ejs কোড রাখা আছে সেটা এটার সাথে Join দিলাম
+		const tempatePath = path.join(
+			process.cwd(),
+			"src/app/templates/forgot-password.ejs",
+		);
 
-	// email massage temp formet / playload থে কে ডাটা নিয়ে বসাচ্ছি
-	const templateData = {
-		name: payload.user.name,
-		email: payload.user.email,
-		OTP: otpvalue, // OTP এখানে যেভাবে লিখবো templates/forgot-password.ejs এ সেইম থাকবে
-		expirationMinutes: expirationSeconds / 60,
-	};
+		// email massage temp formet / playload থে কে ডাটা নিয়ে বসাচ্ছি
+		const templateData = {
+			name: payload.user.name,
+			email: payload.user.email,
+			OTP: otpvalue, // OTP এখানে যেভাবে লিখবো templates/forgot-password.ejs এ সেইম থাকবে
+			expirationMinutes: expirationSeconds / 60,
+		};
 
-	const html = await ejs.renderFile(tempatePath, templateData);
+		const html = await ejs.renderFile(tempatePath, templateData);
 
-	// Password Change করলে Gmail এ email যাবে
-	await transporter.sendMail({
-		// env config file থেকে আসতেছে
-		from: config.email_sender,
-		to: payload.user.email,
-		subject: "Doctor Application - Email Verification",
-		html,
-	});
+		// Password Change করলে Gmail এ email যাবে
+		await transporter.sendMail({
+			// env config file থেকে আসতেছে
+			from: config.email_sender,
+			to: payload.user.email,
+			subject: "Doctor Application - Email Verification",
+			html,
+		});
 
-	return doctorApplication;
+		return doctorApplication;
+	}
 };
-}
 
 const verifyDoctorEmail = async (payload: IVerifyDoctorEmailPayload) => {
 	const otp = payload.otp;
@@ -269,110 +267,108 @@ const verifyDoctorEmail = async (payload: IVerifyDoctorEmailPayload) => {
 };
 
 const approveDoctor = async (
-  payload: IApproveDoctorPayload,
-  reviewer: RequestUser,
+	payload: IApproveDoctorPayload,
+	reviewer: RequestUser,
 ) => {
-  const { doctorId, verificationStatus, rejectionRespon} = payload;
+	const { doctorId, verificationStatus, rejectionRespon } = payload;
 
-  const existingDoctor = await prisma.doctor.findUnique({
-    where: { id: doctorId },
-    include: { user: true },
-  });
+	const existingDoctor = await prisma.doctor.findUnique({
+		where: { id: doctorId },
+		include: { user: true },
+	});
 
-  if (!existingDoctor) {
-    throw new AppError(httpStatus.NOT_FOUND, "Doctor Application Not Found");
-  }
+	if (!existingDoctor) {
+		throw new AppError(httpStatus.NOT_FOUND, "Doctor Application Not Found");
+	}
 
-  if (existingDoctor.isDeleted) {
-    throw new AppError(httpStatus.GONE, "Doctor Application Has Been Deleted");
-  }
+	if (existingDoctor.isDeleted) {
+		throw new AppError(httpStatus.GONE, "Doctor Application Has Been Deleted");
+	}
 
-  if (!existingDoctor.user.emailVerified) {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "Doctor Has Not Verified Their Email Yet. Application Cannot Be Reviewed.",
-    );
-  }
+	if (!existingDoctor.user.emailVerified) {
+		throw new AppError(
+			httpStatus.BAD_REQUEST,
+			"Doctor Has Not Verified Their Email Yet. Application Cannot Be Reviewed.",
+		);
+	}
 
-  if (existingDoctor.verificationStatus !== DoctorVerificationStatus.PANDING) {
-    throw new AppError(
-      httpStatus.CONFLICT,
-      `Doctor Application Has Already Been ${existingDoctor.verificationStatus.toLowerCase()}`,
-    );
-  }
+	if (existingDoctor.verificationStatus !== DoctorVerificationStatus.PANDING) {
+		throw new AppError(
+			httpStatus.CONFLICT,
+			`Doctor Application Has Already Been ${existingDoctor.verificationStatus.toLowerCase()}`,
+		);
+	}
 
-  if (
-    verificationStatus === DoctorVerificationStatus.REJECTED &&
-    !rejectionRespon
-  ) {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "Rejection Reason Is Required When Rejecting A Doctor Application",
-    );
-  }
+	if (
+		verificationStatus === DoctorVerificationStatus.REJECTED &&
+		!rejectionRespon
+	) {
+		throw new AppError(
+			httpStatus.BAD_REQUEST,
+			"Rejection Reason Is Required When Rejecting A Doctor Application",
+		);
+	}
 
-  const isApproved = verificationStatus === DoctorVerificationStatus.APPROVED;
+	const isApproved = verificationStatus === DoctorVerificationStatus.APPROVED;
 
-  const randomDoctorPassword = isApproved
-    ? generateRandomPassword()
-    : undefined;
+	const randomDoctorPassword = isApproved
+		? generateRandomPassword()
+		: undefined;
 
-  if (config.node_env === "development" && randomDoctorPassword) {
-    console.log(`[dev] Random Password plain text: ${randomDoctorPassword}`);
-  }
+	if (config.node_env === "development" && randomDoctorPassword) {
+		console.log(`[dev] Random Password plain text: ${randomDoctorPassword}`);
+	}
 
-  const hashedPassword = randomDoctorPassword
-    ? await bcrypt.hash(randomDoctorPassword, Number(config.bcrypt_salt_rounds))
-    : undefined;
+	const hashedPassword = randomDoctorPassword
+		? await bcrypt.hash(randomDoctorPassword, Number(config.bcrypt_salt_rounds))
+		: undefined;
 
-  const updatedDoctor = await prisma.doctor.update({
-    where: { id: doctorId },
-    data: {
-      verificationStatus,
-      rejectionRespon:
-        verificationStatus === DoctorVerificationStatus.REJECTED
-          ? rejectionRespon
-          : null,
-      reviewedBy: reviewer.userId,
-      reviewedAt: new Date(),
-      ...(hashedPassword
-        ? { user: { update: { password: hashedPassword } } }
-        : {}),
-    },
-  });
+	const updatedDoctor = await prisma.doctor.update({
+		where: { id: doctorId },
+		data: {
+			verificationStatus,
+			rejectionRespon:
+				verificationStatus === DoctorVerificationStatus.REJECTED
+					? rejectionRespon
+					: null,
+			reviewedBy: reviewer.userId,
+			reviewedAt: new Date(),
+			...(hashedPassword
+				? { user: { update: { password: hashedPassword } } }
+				: {}),
+		},
+	});
 
-  const tempatePath = path.join(
-    process.cwd(),
-    `src/app/templates/${
-      isApproved
-        ? "doctor-approved-application.ejs"
-        : "doctor-rejected-application.ejs"
-    }`,
-  );
+	const tempatePath = path.join(
+		process.cwd(),
+		`src/app/templates/${
+			isApproved
+				? "doctor-approved-application.ejs"
+				: "doctor-rejected-application.ejs"
+		}`,
+	);
 
-  const templateData = {
-    name: updatedDoctor.name,
-    reason: updatedDoctor.rejectionRespon,
-    password: isApproved ? randomDoctorPassword : undefined,
-  };
+	const templateData = {
+		name: updatedDoctor.name,
+		reason: updatedDoctor.rejectionRespon,
+		password: isApproved ? randomDoctorPassword : undefined,
+	};
 
-  const html = await ejs.renderFile(tempatePath, templateData);
+	const html = await ejs.renderFile(tempatePath, templateData);
 
-  await transporter.sendMail({
-    from: config.email_sender,
-    to: updatedDoctor.email,
-    subject: isApproved
-      ? "Your Doctor Application Has Been Approved"
-      : "Your Doctor Application Has Been Rejected",
-    html,
-  });
+	await transporter.sendMail({
+		from: config.email_sender,
+		to: updatedDoctor.email,
+		subject: isApproved
+			? "Your Doctor Application Has Been Approved"
+			: "Your Doctor Application Has Been Rejected",
+		html,
+	});
 
-  return updatedDoctor;
+	return updatedDoctor;
 };
 
-
 const getAllDoctors = async (query: IPostQuery) => {
-	
 	// search ,filter,pagination,sorting
 	const limit = query.limit ? Number(query.limit) : 10;
 	const page = query.page ? Number(query.page) : 1;
@@ -493,7 +489,10 @@ const getAllDoctors = async (query: IPostQuery) => {
 	};
 };
 
-const updateDoctorProfile=async(payload:IUpdateDoctorProfilePayload,user:RequestUser)=>{
+const updateDoctorProfile = async (
+	payload: IUpdateDoctorProfilePayload,
+	user: RequestUser,
+) => {
 	const existingDoctor = await prisma.doctor.findUnique({
 		where: { userId: user.userId },
 	});
@@ -508,15 +507,14 @@ const updateDoctorProfile=async(payload:IUpdateDoctorProfilePayload,user:Request
 	});
 
 	return updatedDoctor;
-}
+};
 
 const getAvailableDoctorByTodaysSchedule = async (query: IPostQuery) => {
-
 	const limit = query.limit ? Number(query.limit) : 10;
 	const page = query.page ? Number(query.page) : 1;
 	const skip = (page - 1) * limit;
 	const sortBy = query.sortBy ? query.sortBy : "createdAt";
-	const sortOrder = query.sortOrder ? query.sortOrder : "desc"
+	const sortOrder = query.sortOrder ? query.sortOrder : "desc";
 
 	const now = new Date();
 	const startOfToday = startOfDay(now);
@@ -537,10 +535,11 @@ const getAvailableDoctorByTodaysSchedule = async (query: IPostQuery) => {
 					startDateTime: {
 						gte: startOfToday,
 						lt: startOfTomorrow,
-						
 					},
-					endDateTime:{gt: now}
-				} } },
+					endDateTime: { gt: now },
+				},
+			},
+		},
 	];
 
 	if (query.searchTerm) {
@@ -589,9 +588,9 @@ const getAvailableDoctorByTodaysSchedule = async (query: IPostQuery) => {
 						gte: startOfToday,
 						lt: startOfTomorrow,
 					},
-					endDateTime:{gt: now}
+					endDateTime: { gt: now },
 				},
-				orderBy: {startDateTime:"desc"},
+				orderBy: { startDateTime: "desc" },
 				select: {
 					id: true,
 					startDateTime: true,
@@ -616,15 +615,14 @@ const getAvailableDoctorByTodaysSchedule = async (query: IPostQuery) => {
 			totalPages: Math.ceil(totalAvailableDoctorCount / limit),
 		},
 	};
-}
+};
 
 const getAllDoctorsListPublic = async (query: IPostQuery) => {
-
 	const limit = query.limit ? Number(query.limit) : 10;
 	const page = query.page ? Number(query.page) : 1;
 	const skip = (page - 1) * limit;
 	const sortBy = query.sortBy ? query.sortBy : "createdAt";
-	const sortOrder = query.sortOrder ? query.sortOrder : "desc"
+	const sortOrder = query.sortOrder ? query.sortOrder : "desc";
 
 	const andConditions: DoctorWhereInput[] = [
 		{ isDeleted: false },
@@ -685,10 +683,9 @@ const getAllDoctorsListPublic = async (query: IPostQuery) => {
 			totalPages: Math.ceil(totalDoctorCount / limit),
 		},
 	};
-}
+};
 
 const getSingleDoctorPublicProfile = async (doctorId: string) => {
-
 	const doctor = await prisma.doctor.findUnique({
 		where: {
 			id: doctorId,
@@ -713,8 +710,7 @@ const getSingleDoctorPublicProfile = async (doctorId: string) => {
 	}
 
 	return doctor;
-}
-
+};
 
 export const DoctorService = {
 	applyAsDoctor,
@@ -724,5 +720,5 @@ export const DoctorService = {
 	updateDoctorProfile,
 	getAvailableDoctorByTodaysSchedule,
 	getAllDoctorsListPublic,
-	getSingleDoctorPublicProfile
+	getSingleDoctorPublicProfile,
 };

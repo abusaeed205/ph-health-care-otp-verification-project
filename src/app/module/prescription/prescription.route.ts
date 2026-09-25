@@ -8,16 +8,16 @@ import { PrescriptionController } from "./prescription.conroller";
 const router = Router();
 
 router.post(
-    "/create-prescription",
-    auth(Role.DOCTOR),
-    validateRequest(CreatePrescriptionValidationZodSchema),
-    PrescriptionController.createPrescription,
+	"/create-prescription",
+	auth(Role.DOCTOR),
+	validateRequest(CreatePrescriptionValidationZodSchema),
+	PrescriptionController.createPrescription,
 );
 
 router.get(
-    "/:appointmentId",
-    auth(Role.PATIENT, Role.DOCTOR, Role.ADMIN, Role.SUPER_ADMIN),
-    PrescriptionController.getSinglePrescription,
+	"/:appointmentId",
+	auth(Role.PATIENT, Role.DOCTOR, Role.ADMIN, Role.SUPER_ADMIN),
+	PrescriptionController.getSinglePrescription,
 );
 
 export const PrescriptionRoutes = router;

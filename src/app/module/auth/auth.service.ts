@@ -25,7 +25,7 @@ import ejs from "ejs";
 import path from "path";
 import { TokenPayload } from "google-auth-library";
 import { AppError } from "../../utils/appError";
-import httpStatus from "http-status"
+import httpStatus from "http-status";
 import { email } from "zod";
 
 const registerPatient = async (payload: IRegisterPatientPayload) => {
@@ -49,11 +49,10 @@ const registerPatient = async (payload: IRegisterPatientPayload) => {
 	const otpkey = `patient-registration-otp:${email}`;
 	const otpValue = crypto.randomInt(100000, 1000000).toString(); // crypto দিয়ে Random OTP বানাচ্ছি
 
-	// frontand এর জন্য 
-	if(config.node_env === "development"){
-		console.log(`register patient (service):[dev] OTP ${email}:${otpValue}`)
+	// frontand এর জন্য
+	if (config.node_env === "development") {
+		console.log(`register patient (service):[dev] OTP ${email}:${otpValue}`);
 	}
-
 
 	// redisclient lib foulder থেকে আসতেছে এবং clien email and OTP  Set করছি
 	await redisclient.set(otpkey, otpValue, {
@@ -250,7 +249,7 @@ const loginUser = async (payload: ILoginUserPayload) => {
 	});
 
 	if (!user) {
-		throw new AppError(httpStatus.NOT_FOUND,"user Not Found");
+		throw new AppError(httpStatus.NOT_FOUND, "user Not Found");
 	}
 
 	if (user.status === UserStatus.BLOCKED) {
@@ -376,7 +375,7 @@ const googleLogin = async (payload: IGoogleLoginPayload) => {
 	//  google-auth-library থেকে TokenPayload পাই
 	let googleIdTokenPayload: TokenPayload | undefined;
 
-    //  Check করা হচ্ছে Token-টি আমাদের Application-এর জন্যই তৈরি হয়েছে কি না।
+	//  Check করা হচ্ছে Token-টি আমাদের Application-এর জন্যই তৈরি হয়েছে কি না।
 	try {
 		//googleclient lib থেকে পাই
 		const ticket = await googleclient.verifyIdToken({
@@ -401,10 +400,10 @@ const googleLogin = async (payload: IGoogleLoginPayload) => {
 	if (!googleIdTokenPayload.email_verified) {
 		throw new Error("Google email is not verified");
 	}
- 
-	// payload থেকে Data ডিচট্রাকচার করছি 
+
+	// payload থেকে Data ডিচট্রাকচার করছি
 	const { email, name, sub: googleId } = googleIdTokenPayload;
-	//check Database এ আগে থেকে user আছে কি 
+	//check Database এ আগে থেকে user আছে কি
 	const existingUser = await prisma.user.findUnique({ where: { email } });
 
 	let user: NonNullable<typeof existingUser>;
@@ -421,12 +420,12 @@ const googleLogin = async (payload: IGoogleLoginPayload) => {
 		if (existingUser.googleId === googleId) {
 			user = existingUser;
 		} else if (existingUser.googleId) {
-	
 			throw new Error("This email is linked to a different Google account");
 		} else {
-
 			if (!existingUser.emailVerified) {
-				throw new Error("Email is not verified, please verify your email first");
+				throw new Error(
+					"Email is not verified, please verify your email first",
+				);
 			}
 			user = await prisma.user.update({
 				where: { id: existingUser.id },
@@ -452,7 +451,7 @@ const googleLogin = async (payload: IGoogleLoginPayload) => {
 		isNewUser = true;
 	}
 
-	//-----Google Register Auto Email Send----------------  
+	//-----Google Register Auto Email Send----------------
 
 	if (isNewUser) {
 		try {
@@ -481,7 +480,6 @@ const googleLogin = async (payload: IGoogleLoginPayload) => {
 		}
 	}
 
-
 	const jwtPayload = {
 		userId: user.id,
 		name: user.name,
@@ -503,7 +501,6 @@ const googleLogin = async (payload: IGoogleLoginPayload) => {
 
 	return { accessToken, refreshToken };
 };
-
 
 const forgetPassword = async (payload: IForgotPasswordPayload) => {
 	const { email } = payload;

@@ -12,7 +12,7 @@ export const globalErrorHandler = async (
 	_next: NextFunction,
 ) => {
 	if (config.node_env === "development") {
-		console.log("Error from Global Error Handler", err);//-------------------------------
+		console.log("Error from Global Error Handler", err); //-------------------------------
 	}
 
 	let statusCode: number = httpStatus.INTERNAL_SERVER_ERROR;
@@ -47,12 +47,11 @@ export const globalErrorHandler = async (
 	} else if (err instanceof Prisma.PrismaClientUnknownRequestError) {
 		statusCode = httpStatus.INTERNAL_SERVER_ERROR;
 		errorMessage = "Error occurred during query execution";
-	} else if(err instanceof AppError){
-		errorMessage =err.message
-		statusCode=err.statusCode
-	}
-	else if (err instanceof Error) {
-		errorMessage = err.message
+	} else if (err instanceof AppError) {
+		errorMessage = err.message;
+		statusCode = err.statusCode;
+	} else if (err instanceof Error) {
+		errorMessage = err.message;
 	}
 
 	res.status(statusCode).json({

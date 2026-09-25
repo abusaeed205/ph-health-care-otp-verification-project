@@ -74,29 +74,23 @@ const getAllDoctors = catchAsync(async (req: Request, res: Response) => {
 	});
 });
 
-const updateDoctorProfile = catchAsync(
-	async (req: Request, res: Response) => {
-		const payload = req.body;
-		const user = req.user!;
+const updateDoctorProfile = catchAsync(async (req: Request, res: Response) => {
+	const payload = req.body;
+	const user = req.user!;
 
-		const result = await DoctorService.updateDoctorProfile(payload, user);
-		sendResponse(res, {
-			statusCode: httpStatus.OK,
-			success: true,
-			message: "Doctor Profile Updated Successfully",
-			data: result,
-		});
-	},
-);
-
+	const result = await DoctorService.updateDoctorProfile(payload, user);
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		success: true,
+		message: "Doctor Profile Updated Successfully",
+		data: result,
+	});
+});
 
 const getAvailableDoctorByTodaysSchedule = catchAsync(
 	async (req: Request, res: Response) => {
-	
-
-		const { data, meta } = await DoctorService.getAvailableDoctorByTodaysSchedule(
-			req.query
-		);
+		const { data, meta } =
+			await DoctorService.getAvailableDoctorByTodaysSchedule(req.query);
 		sendResponse(res, {
 			statusCode: httpStatus.OK,
 			success: true,
@@ -107,29 +101,26 @@ const getAvailableDoctorByTodaysSchedule = catchAsync(
 	},
 );
 
-const getAllDoctorsListPublic = catchAsync(async (req: Request, res: Response) => {
-
-
-	const { data, meta } = await DoctorService.getAllDoctorsListPublic(
-		req.query
-	);
-	sendResponse(res, {
-		statusCode: httpStatus.OK,
-		success: true,
-		message: "Doctors Retrieved Successfully",
-		data,
-		meta,
-	});
-});
+const getAllDoctorsListPublic = catchAsync(
+	async (req: Request, res: Response) => {
+		const { data, meta } = await DoctorService.getAllDoctorsListPublic(
+			req.query,
+		);
+		sendResponse(res, {
+			statusCode: httpStatus.OK,
+			success: true,
+			message: "Doctors Retrieved Successfully",
+			data,
+			meta,
+		});
+	},
+);
 
 const getSingleDoctorPublicProfile = catchAsync(
 	async (req: Request, res: Response) => {
+		const doctorId = req.params.doctorId as string;
 
-		const doctorId = req.params.doctorId as string
-		
-		const result = await DoctorService.getSingleDoctorPublicProfile(
-			doctorId
-		);
+		const result = await DoctorService.getSingleDoctorPublicProfile(doctorId);
 		sendResponse(res, {
 			statusCode: httpStatus.OK,
 			success: true,
@@ -139,10 +130,6 @@ const getSingleDoctorPublicProfile = catchAsync(
 	},
 );
 
-
-
-
-
 export const DoctorController = {
 	applyAsDoctor,
 	verifyDoctorEmail,
@@ -151,5 +138,5 @@ export const DoctorController = {
 	updateDoctorProfile,
 	getAvailableDoctorByTodaysSchedule,
 	getAllDoctorsListPublic,
-	getSingleDoctorPublicProfile 
+	getSingleDoctorPublicProfile,
 };

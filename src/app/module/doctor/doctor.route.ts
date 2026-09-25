@@ -54,15 +54,8 @@ router.get(
 	DoctorController.getAvailableDoctorByTodaysSchedule,
 );
 
-router.get(
-	"/public/all-doctors",
-	DoctorController.getAllDoctorsListPublic,
-);
+router.get("/public/all-doctors", DoctorController.getAllDoctorsListPublic);
 
-router.get(
-	"/public/:doctorId",
-	DoctorController.getSingleDoctorPublicProfile,
-);
-
+router.get("/public/:doctorId", DoctorController.getSingleDoctorPublicProfile);
 
 export const DoctorRoutes = router;

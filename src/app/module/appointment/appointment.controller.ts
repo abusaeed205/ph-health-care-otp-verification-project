@@ -116,9 +116,7 @@ const getDoctorAppointments = catchAsync(
 );
 
 const getAllAppointments = catchAsync(async (req: Request, res: Response) => {
-	const { data, meta } = await AppointmentServices.getAllAppoinents(
-		req.query,
-	);
+	const { data, meta } = await AppointmentServices.getAllAppoinents(req.query);
 	sendResponse(res, {
 		statusCode: httpStatus.OK,
 		success: true,
@@ -144,7 +142,6 @@ const getSingleAppointment = catchAsync(async (req: Request, res: Response) => {
 	});
 });
 
-
 export const AppointMentController = {
 	bookAppointment,
 	payAppointment,
@@ -152,8 +149,7 @@ export const AppointMentController = {
 	cancellAppointment,
 	updateAppointmentStatus,
 	getMyAppointments,
-    getDoctorAppointments,
+	getDoctorAppointments,
 	getAllAppointments,
-	getSingleAppointment 
-
+	getSingleAppointment,
 };
